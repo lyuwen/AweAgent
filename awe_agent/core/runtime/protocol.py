@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from awe_agent.core.runtime.config import RuntimeConfig
 from awe_agent.core.runtime.types import ExecutionResult
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeSession(ABC):
@@ -108,9 +112,25 @@ class Runtime(ABC):
         image: str | None = None,
         **kwargs: object,
     ) -> AsyncIterator[RuntimeSession]:
-        """Context manager for runtime sessions. Ensures cleanup."""
+        """Context manager for runtime sessions. Ensures cleanup.
+
+        Enforces ``config.timeout`` as a hard session TTL at the protocol
+        level.  Individual backends (e.g. Docker) may enforce tighter
+        per-operation timeouts internally; this acts as a final safety net.
+        """
         sess = await self.create_session(image, **kwargs)
         try:
-            yield sess
+            timeout = self.config.timeout
+            if timeout and timeout > 0:
+                async with asyncio.timeout(timeout):
+                    yield sess
+            else:
+                yield sess
+        except TimeoutError:
+            logger.error(
+                "Session TTL expired after %ds — force-closing session",
+                self.config.timeout,
+            )
+            raise
         finally:
             await sess.close()

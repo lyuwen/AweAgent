@@ -1,11 +1,11 @@
 # BeyondSWE Search Mode Configuration
 # Usage: awe-agent run -c configs/tasks/beyond_swe_search.yaml
 
-llm: "!include ../llm/openai.yaml"
+llm: "!include ../llm/azure.yaml"
 
 runtime:
   backend: docker
-  timeout: 7200
+  timeout: 14400
   workdir: /testbed
   resource_limits:
     cpu: "4"
@@ -13,15 +13,14 @@ runtime:
 
 agent:
   type: search_swe
-  max_steps: 100
+  max_steps: 200
   enable_search: true
   tools:
     - bash
     - editor
-    - think
     - search
     - link_summary
-  bash_timeout: 180
+  bash_timeout: 1200
 
 task:
   type: beyond_swe

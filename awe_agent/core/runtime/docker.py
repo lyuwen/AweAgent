@@ -52,11 +52,18 @@ class DockerSession(RuntimeSession):
 
         loop = asyncio.get_event_loop()
 
-        if timeout:
-            exit_code, output = await asyncio.wait_for(
-                loop.run_in_executor(None, _run),
-                timeout=timeout,
-            )
+        # Per-command timeout (e.g. bash_timeout=120); session TTL is
+        # enforced at the protocol layer via asyncio.timeout().
+        if timeout is not None:
+            try:
+                exit_code, output = await asyncio.wait_for(
+                    loop.run_in_executor(None, _run),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                raise TimeoutError(
+                    f"Command timed out after {timeout}s: {command[:200]}"
+                )
         else:
             exit_code, output = await loop.run_in_executor(None, _run)
 
@@ -151,7 +158,7 @@ class DockerRuntime(Runtime):
         if not img:
             raise ValueError("No image specified for Docker runtime")
 
-        container_name = f"awe-agent-{uuid.uuid4().hex[:12]}"
+        container_name = f"awe-agent-{img}-{uuid.uuid4().hex[:12]}"
 
         def _create() -> Any:
             # Pull if needed

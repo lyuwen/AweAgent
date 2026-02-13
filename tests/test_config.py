@@ -49,7 +49,7 @@ def test_llm_config_fields():
 def test_runtime_config_defaults():
     cfg = RuntimeConfig()
     assert cfg.backend == "docker"
-    assert cfg.timeout == 7200
+    assert cfg.timeout == 14400
     assert cfg.workdir == "/testbed"
     assert cfg.resource_limits.cpu == "4"
     assert cfg.resource_limits.memory == "8Gi"

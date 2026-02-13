@@ -18,7 +18,7 @@ llm:
 runtime:
   backend: docker
   image: "python:3.11-slim"
-  timeout: 7200
+  timeout: 14400
   workdir: /testbed
   resource_limits:
     cpu: "4"

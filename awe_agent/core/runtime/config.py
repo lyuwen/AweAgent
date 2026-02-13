@@ -39,7 +39,7 @@ class RuntimeConfig(BaseModel):
         runtime:
           backend: docker
           image: "ghcr.io/awe-agent/swe-bench:latest"
-          timeout: 7200
+          timeout: 14400
           resource_limits:
             cpu: "4"
             memory: "8Gi"
@@ -49,7 +49,7 @@ class RuntimeConfig(BaseModel):
 
     backend: str = "docker"
     image: str = ""
-    timeout: int = 7200  # Session TTL in seconds
+    timeout: int = 14400  # Session TTL in seconds
     workdir: str = "/testbed"
     resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
 
