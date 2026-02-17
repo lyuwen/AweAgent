@@ -10,7 +10,7 @@ Usage:
         response = await client.chat([Message(role="user", content="Hello")])
 """
 
-from awe_agent.core.llm.client import LLMClient, llm_registry
+from awe_agent.core.llm.client import LLMClient, create_async_client, llm_registry
 from awe_agent.core.llm.config import LLMConfig
 from awe_agent.core.llm.protocol import LLMBackend
 from awe_agent.core.llm.types import LLMResponse, Message, TokenUsage, ToolCall
@@ -18,6 +18,7 @@ from awe_agent.core.llm.types import LLMResponse, Message, TokenUsage, ToolCall
 __all__ = [
     "LLMBackend",
     "LLMClient",
+    "create_async_client",
     "LLMConfig",
     "LLMResponse",
     "Message",

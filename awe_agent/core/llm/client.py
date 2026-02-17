@@ -22,6 +22,63 @@ logger = logging.getLogger(__name__)
 llm_registry: Registry[type] = Registry("awe_agent.llm_backend")
 
 
+def create_async_client(
+    backend: str = "openai",
+    api_key: str | None = None,
+    base_url: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Create a raw async LLM client (OpenAI-compatible).
+
+    A lightweight factory that creates just the underlying async client
+    without middleware or response parsing. Useful for tools that need
+    direct access to the ``chat.completions.create`` API.
+
+    Args:
+        backend: One of ``"openai"``, ``"azure"``, ``"ark"``.
+        api_key: API key for the service.
+        base_url: Base URL / endpoint for the service.
+        **kwargs: Backend-specific arguments:
+            - ``azure_endpoint``: Azure endpoint (falls back to *base_url*).
+            - ``api_version``: Azure API version (default ``"2024-02-01"``).
+            - ``timeout``: Request timeout in seconds.
+
+    Returns:
+        An ``AsyncOpenAI``, ``AsyncAzureOpenAI``, or ``AsyncArk`` client.
+    """
+    timeout = kwargs.get("timeout")
+
+    if backend == "azure":
+        from openai import AsyncAzureOpenAI
+        return AsyncAzureOpenAI(
+            api_key=api_key,
+            azure_endpoint=kwargs.get("azure_endpoint") or base_url or "",
+            api_version=kwargs.get("api_version", "2024-02-01"),
+            **({"timeout": timeout} if timeout else {}),
+        )
+
+    if backend == "ark":
+        try:
+            from volcenginesdkarkruntime import AsyncArk  # type: ignore[import-untyped]
+            return AsyncArk(
+                api_key=api_key,
+                base_url=base_url,
+                **({"timeout": timeout} if timeout else {}),
+            )
+        except ImportError:
+            logger.warning(
+                "volcenginesdkarkruntime not installed, falling back to openai"
+            )
+
+    # Default: openai (also fallback for failed ark import)
+    from openai import AsyncOpenAI
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        **({"timeout": timeout} if timeout else {}),
+    )
+
+
 class LLMClient:
     """Unified LLM client.
 

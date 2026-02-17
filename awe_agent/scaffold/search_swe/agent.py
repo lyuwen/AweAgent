@@ -21,9 +21,9 @@ from awe_agent.core.agent.protocol import Agent
 from awe_agent.core.agent.trajectory import Action
 from awe_agent.core.tool.builtin.bash import BashTool
 from awe_agent.core.tool.builtin.editor import FileEditorTool
-from awe_agent.core.tool.builtin.search import LinkSummaryTool, SearchTool
 from awe_agent.core.tool.builtin.think import ThinkTool
 from awe_agent.core.tool.protocol import Tool
+from awe_agent.core.tool.search import LinkSummaryTool, SearchConstraints, SearchTool
 from awe_agent.scaffold.search_swe.prompts.config import resolve_from_task_info
 from awe_agent.scaffold.search_swe.prompts.system import get_system_prompt
 
@@ -61,7 +61,6 @@ class SearchSWEAgent(Agent):
         max_output_length: Truncate bash output beyond this many characters.
         bash_blacklist: Regex patterns for blocked bash commands.
         enable_think: Include the Think tool. Defaults to ``True``.
-        search_max_results: Max results from web search.
         blocked_search_domains: Domains blocked from search results.
 
     Example::
@@ -73,11 +72,19 @@ class SearchSWEAgent(Agent):
     @classmethod
     def from_config(cls, config: AweAgentConfig) -> SearchSWEAgent:
         """Create a SearchSWEAgent from the global config."""
+        # Build search constraints from security config
+        search_constraints: SearchConstraints | None = None
+        if config.security.blocked_search_patterns:
+            search_constraints = SearchConstraints(
+                blocked_patterns=config.security.blocked_search_patterns,
+            )
+
         return cls(
             enable_search=config.agent.enable_search,
             bash_timeout=config.agent.bash_timeout,
             max_output_length=config.agent.max_output_length,
             bash_blacklist=config.security.bash_blacklist or None,
+            search_constraints=search_constraints,
         )
 
     def __init__(
@@ -87,17 +94,21 @@ class SearchSWEAgent(Agent):
         max_output_length: int = 32000,
         bash_blacklist: list[str] | None = None,
         enable_think: bool = False,
-        search_max_results: int = 10,
-        blocked_search_domains: list[str] | None = None,
+        search_constraints: SearchConstraints | None = None,
     ) -> None:
         self._enable_search = enable_search
+
+        # Extend bash blacklist with constraint-derived patterns
+        effective_blacklist = list(bash_blacklist or _DEFAULT_BLACKLIST)
+        if search_constraints is not None:
+            effective_blacklist.extend(search_constraints.get_bash_blocklist_patterns())
 
         # Core tools
         self._tools: list[Tool] = [
             BashTool(
                 timeout=bash_timeout,
                 max_output_length=max_output_length,
-                blacklist=bash_blacklist or list(_DEFAULT_BLACKLIST),
+                blacklist=effective_blacklist,
             ),
             FileEditorTool(),
         ]
@@ -107,10 +118,11 @@ class SearchSWEAgent(Agent):
 
         if enable_search:
             self._tools.append(SearchTool(
-                max_results=search_max_results,
-                blocked_domains=blocked_search_domains,
+                constraints=search_constraints,
             ))
-            self._tools.append(LinkSummaryTool())
+            self._tools.append(LinkSummaryTool(
+                constraints=search_constraints,
+            ))
 
     # ── Agent protocol ────────────────────────────────────────────────
 

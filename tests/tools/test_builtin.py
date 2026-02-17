@@ -7,7 +7,7 @@ import pytest
 from awe_agent.core.runtime.types import ExecutionResult
 from awe_agent.core.tool.builtin.bash import BashTool
 from awe_agent.core.tool.builtin.editor import FileEditorTool
-from awe_agent.core.tool.builtin.search import LinkSummaryTool, SearchTool
+from awe_agent.core.tool.search import LinkSummaryTool, SearchTool
 from awe_agent.core.tool.builtin.think import ThinkTool
 from tests.conftest import MockRuntimeSession
 
@@ -141,6 +141,7 @@ def test_search_schema():
 async def test_search_default():
     tool = SearchTool()
     result = await tool.execute({"query": "python asyncio timeout"})
+    # Without bandai_mcp_host, returns no results
     assert "python asyncio timeout" in result
 
 
@@ -158,10 +159,18 @@ def test_link_summary_schema():
     tool = LinkSummaryTool()
     assert tool.name == "link_summary"
     assert "url" in tool.parameters["properties"]
+    assert "goal" in tool.parameters["properties"]
 
 
 @pytest.mark.asyncio
-async def test_link_summary_requires_session():
+async def test_link_summary_empty_url():
     tool = LinkSummaryTool()
-    result = await tool.execute({"url": "https://example.com"})
-    assert "requires a runtime session" in result.lower()
+    result = await tool.execute({"url": "", "goal": "test"})
+    assert "error" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_link_summary_empty_goal():
+    tool = LinkSummaryTool()
+    result = await tool.execute({"url": "https://example.com", "goal": ""})
+    assert "error" in result.lower()

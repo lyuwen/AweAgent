@@ -50,8 +50,9 @@ beyond_swe = "awe_agent.tasks.beyond_swe.evaluator:BeyondSWEEvaluator"
 bash = "awe_agent.core.tool.builtin.bash:BashTool"
 editor = "awe_agent.core.tool.builtin.editor:FileEditorTool"
 think = "awe_agent.core.tool.builtin.think:ThinkTool"
-search = "awe_agent.core.tool.builtin.search:SearchTool"
-link_summary = "awe_agent.core.tool.builtin.search:LinkSummaryTool"
+search = "awe_agent.core.tool.search:SearchTool"
+link_summary = "awe_agent.core.tool.search:LinkSummaryTool"
+link_reader = "awe_agent.core.tool.search:LinkReaderTool"
 
 [build-system]
 requires = ["hatchling"]

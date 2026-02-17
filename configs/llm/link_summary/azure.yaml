@@ -1,0 +1,13 @@
+# Azure OpenAI backend for LinkSummaryTool
+# Usage:
+#   export LINK_SUMMARY_CONFIG_PATH=configs/llm/link_summary/azure.yaml
+#   export LINK_SUMMARY_MODEL=gpt-5.2-2025-12-11   (optional, overrides model below)
+
+backend: azure
+azure_endpoint: https://search.bytedance.net/gpt/openapi/online/v2/crawl/openai/deployments/gpt_openapi
+api_version: 2024-03-01-preview
+api_key: FOfny8V3hR34IrkbETHO636OhRF4HPxr_GPT_AK
+model: gpt-5-2025-08-07
+params:
+  # temperature: 1  # gpt-5 only supports temperature=1
+  max_completion_tokens: 32768

@@ -1,0 +1,418 @@
+"""Tests for search tools: SearchConstraints, SearchTool, LinkReaderTool, LinkSummaryTool."""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from awe_agent.core.tool.search.constraints import SearchConstraints
+from awe_agent.core.tool.search.link_reader_tool import LinkReaderTool
+from awe_agent.core.tool.search.link_summary_tool import LinkSummaryTool
+from awe_agent.core.tool.search.search_tool import SearchTool
+
+
+# ── SearchConstraints ───────────────────────────────────────────────────────
+
+
+class TestSearchConstraints:
+
+    def test_from_repo_with_owner(self):
+        c = SearchConstraints.from_repo("django/django")
+        assert c._repo_owner == "django"
+        assert c._repo_name == "django"
+        assert len(c.blocked_patterns["url"]) == 3  # github, gitlab, raw
+
+    def test_from_repo_without_owner(self):
+        c = SearchConstraints.from_repo("flask")
+        assert c._repo_owner is None
+        assert c._repo_name == "flask"
+        # Patterns use [^/]+ wildcard for owner
+        assert any("[^/]+" in p for p in c.blocked_patterns["url"])
+
+    def test_from_repo_special_chars(self):
+        """Repo names with regex-special chars should be escaped."""
+        c = SearchConstraints.from_repo("owner/my.repo+plus")
+        assert c.is_url_blocked("https://github.com/owner/my.repo+plus/issues")
+        # Should NOT match without the dot (regex . would match any char)
+        assert not c.is_url_blocked("https://github.com/owner/myXrepo+plus/issues")
+
+    def test_is_url_blocked(self):
+        c = SearchConstraints.from_repo("django/django")
+        assert c.is_url_blocked("https://github.com/django/django/pull/42")
+        assert c.is_url_blocked("https://GITHUB.COM/django/django")  # case insensitive
+        assert c.is_url_blocked("https://gitlab.com/django/django/issues/1")
+        assert not c.is_url_blocked("https://stackoverflow.com/questions/django")
+        assert not c.is_url_blocked("https://github.com/django/django-extensions")
+
+    def test_is_url_blocked_invalid_regex(self):
+        """Invalid regex patterns should not crash, just log warning."""
+        bad_pattern = "[invalid"
+        c = SearchConstraints(blocked_patterns={"url": [bad_pattern]})
+        assert not c.is_url_blocked("https://example.com")
+
+    def test_filter_search_results(self):
+        c = SearchConstraints.from_repo("django/django")
+        results = [
+            {"url": "https://github.com/django/django/pull/42", "title": "Fix"},
+            {"url": "https://stackoverflow.com/q/123", "title": "Help"},
+            {"url": "https://gitlab.com/django/django/issues/1", "title": "Bug"},
+            {"url": "https://docs.djangoproject.com/en/5.0/", "title": "Docs"},
+        ]
+        filtered, count = c.filter_search_results(results)
+        assert count == 2
+        assert len(filtered) == 2
+        assert filtered[0]["url"] == "https://stackoverflow.com/q/123"
+        assert filtered[1]["url"] == "https://docs.djangoproject.com/en/5.0/"
+
+    def test_filter_empty_patterns(self):
+        c = SearchConstraints()
+        results = [{"url": "https://example.com"}]
+        filtered, count = c.filter_search_results(results)
+        assert count == 0
+        assert filtered == results
+
+    def test_filter_multiple_fields(self):
+        c = SearchConstraints(blocked_patterns={
+            "url": [r".*blocked\.com.*"],
+            "title": [r".*SECRET.*"],
+        })
+        results = [
+            {"url": "https://ok.com", "title": "SECRET doc"},
+            {"url": "https://blocked.com/page", "title": "Fine"},
+            {"url": "https://ok.com", "title": "Fine"},
+        ]
+        filtered, count = c.filter_search_results(results)
+        assert count == 2
+        assert len(filtered) == 1
+        assert filtered[0]["title"] == "Fine"
+
+    def test_get_bash_blocklist_patterns(self):
+        c = SearchConstraints.from_repo("django/django")
+        patterns = c.get_bash_blocklist_patterns()
+        assert any("git\\s+clone" in p for p in patterns)
+        assert any("api\\.github\\.com" in p for p in patterns)
+
+    def test_get_bash_blacklist_empty(self):
+        c = SearchConstraints()
+        assert c.get_bash_blocklist_patterns() == []
+
+    def test_merge(self):
+        c1 = SearchConstraints.from_repo("django/django")
+        c2 = SearchConstraints(blocked_patterns={
+            "url": [r".*extra\.com.*"],
+            "title": [r".*BLOCKED.*"],
+        })
+        merged = c1.merge(c2)
+        # Has both url sets
+        assert len(merged.blocked_patterns["url"]) == len(c1.blocked_patterns["url"]) + 1
+        assert "title" in merged.blocked_patterns
+        # Original objects unchanged
+        assert "title" not in c1.blocked_patterns
+
+    def test_merge_deduplicates(self):
+        c1 = SearchConstraints(blocked_patterns={"url": ["pattern_a"]})
+        c2 = SearchConstraints(blocked_patterns={"url": ["pattern_a", "pattern_b"]})
+        merged = c1.merge(c2)
+        assert merged.blocked_patterns["url"] == ["pattern_a", "pattern_b"]
+
+
+# ── SearchTool ──────────────────────────────────────────────────────────────
+
+
+class TestSearchTool:
+
+    @pytest.mark.asyncio
+    async def test_single_query(self):
+        async def fake_search(**kwargs):
+            return [
+                {"title": "Result 1", "url": "https://a.com", "description": "Desc 1"},
+                {"title": "Result 2", "url": "https://b.com", "description": "Desc 2"},
+            ]
+
+        tool = SearchTool(search_fn=fake_search)
+        result = await tool.execute({"query": "python async"})
+        assert "python async" in result
+        assert "Result 1" in result
+        assert "Result 2" in result
+
+    @pytest.mark.asyncio
+    async def test_batch_query(self):
+        calls: list[str] = []
+
+        async def fake_search(**kwargs):
+            calls.append(kwargs["query"])
+            return [{"title": f"For: {kwargs['query']}", "url": "https://x.com"}]
+
+        tool = SearchTool(search_fn=fake_search)
+        result = await tool.execute({"query": ["query1", "query2"]})
+        assert len(calls) == 2
+        assert "query1" in result
+        assert "query2" in result
+
+    @pytest.mark.asyncio
+    async def test_constraint_filtering(self):
+        async def fake_search(**kwargs):
+            return [
+                {"title": "Repo PR", "url": "https://github.com/django/django/pull/1"},
+                {"title": "SO Answer", "url": "https://stackoverflow.com/q/123"},
+            ]
+
+        constraints = SearchConstraints.from_repo("django/django")
+        tool = SearchTool(search_fn=fake_search, constraints=constraints)
+        result = await tool.execute({"query": "django bug"})
+        assert "SO Answer" in result
+        assert "Repo PR" not in result
+        assert "1 result(s) filtered" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_query(self):
+        tool = SearchTool()
+        result = await tool.execute({"query": ""})
+        assert "error" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_search_fn_returns_json_string(self):
+        """search_fn returns a JSON string instead of a dict/list."""
+        import json
+
+        async def fake_search(**kwargs):
+            return json.dumps({"results": [{"title": "Found", "url": "https://x.com"}]})
+
+        tool = SearchTool(search_fn=fake_search)
+        result = await tool.execute({"query": "test"})
+        assert "Found" in result
+
+    @pytest.mark.asyncio
+    async def test_search_fn_raises(self):
+        """search_fn raises an exception — should not crash, returns no results."""
+        async def failing_search(**kwargs):
+            raise ConnectionError("timeout")
+
+        tool = SearchTool(search_fn=failing_search, max_attempts=2)
+        result = await tool.execute({"query": "test"})
+        assert "No results found" in result
+
+    @pytest.mark.asyncio
+    async def test_num_and_start_passed(self):
+        received: dict[str, Any] = {}
+
+        async def capture_search(**kwargs):
+            received.update(kwargs)
+            return []
+
+        tool = SearchTool(search_fn=capture_search)
+        await tool.execute({"query": "test", "num": 5, "start": 10})
+        assert received["num"] == 5
+        assert received["start"] == 10
+
+
+# ── LinkReaderTool ──────────────────────────────────────────────────────────
+
+
+class TestLinkReaderTool:
+
+    @pytest.mark.asyncio
+    async def test_fetch_plain_text(self):
+        async def fake_reader(url):
+            return "Hello, this is the page content."
+
+        tool = LinkReaderTool(reader_fn=fake_reader)
+        result = await tool.execute({"url": "https://example.com"})
+        assert "Hello, this is the page content." in result
+
+    @pytest.mark.asyncio
+    async def test_fetch_json_response(self):
+        async def fake_reader(url):
+            return {"content": "Extracted content here"}
+
+        tool = LinkReaderTool(reader_fn=fake_reader)
+        result = await tool.execute({"url": "https://example.com"})
+        assert "Extracted content here" in result
+
+    @pytest.mark.asyncio
+    async def test_fetch_json_string(self):
+        import json
+
+        async def fake_reader(url):
+            return json.dumps({"content": "From JSON string"})
+
+        tool = LinkReaderTool(reader_fn=fake_reader)
+        result = await tool.execute({"url": "https://example.com"})
+        assert "From JSON string" in result
+
+    @pytest.mark.asyncio
+    async def test_url_blocked(self):
+        constraints = SearchConstraints.from_repo("django/django")
+        tool = LinkReaderTool(constraints=constraints, reader_fn=AsyncMock())
+        result = await tool.execute({"url": "https://github.com/django/django/blob/main/README.md"})
+        assert "ACCESS DENIED" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_url(self):
+        tool = LinkReaderTool()
+        result = await tool.execute({"url": ""})
+        assert "error" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_truncation(self):
+        long_content = "word " * 100000  # very long
+
+        async def fake_reader(url):
+            return long_content
+
+        tool = LinkReaderTool(reader_fn=fake_reader, max_content_tokens=100)
+        result = await tool.execute({"url": "https://example.com"})
+        assert "truncated" in result
+        assert len(result) < len(long_content)
+
+    @pytest.mark.asyncio
+    async def test_reader_fn_raises(self):
+        async def failing_reader(url):
+            raise IOError("network error")
+
+        tool = LinkReaderTool(reader_fn=failing_reader, max_attempts=1)
+        result = await tool.execute({"url": "https://example.com"})
+        assert "Error: failed to fetch" in result
+
+
+# ── LinkSummaryTool ─────────────────────────────────────────────────────────
+
+
+def _make_mock_llm_client(summary_text: str = "This is the summary.") -> MagicMock:
+    """Create a mock OpenAI-compatible async client."""
+    mock_message = MagicMock()
+    mock_message.content = summary_text
+
+    mock_choice = MagicMock()
+    mock_choice.message = mock_message
+
+    mock_response = MagicMock()
+    mock_response.choices = [mock_choice]
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    return mock_client
+
+
+class TestLinkSummaryTool:
+
+    @pytest.mark.asyncio
+    async def test_full_pipeline(self):
+        """End-to-end: fetch + summarize with injected dependencies."""
+        async def fake_reader(url):
+            return "Django is a Python web framework."
+
+        reader = LinkReaderTool(reader_fn=fake_reader)
+        mock_client = _make_mock_llm_client("Django is a high-level web framework for Python.")
+
+        tool = LinkSummaryTool(
+            llm_client=mock_client,
+            llm_model="test-model",
+            reader=reader,
+        )
+        result = await tool.execute({
+            "url": "https://docs.djangoproject.com",
+            "goal": "What is Django?",
+        })
+        assert "Summary of" in result
+        assert "high-level web framework" in result
+
+        # Verify LLM was called with correct structure
+        call_kwargs = mock_client.chat.completions.create.call_args
+        messages = call_kwargs.kwargs["messages"]
+        assert messages[0]["role"] == "system"
+        assert messages[1]["role"] == "user"
+        assert "What is Django?" in messages[1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_url_blocked(self):
+        constraints = SearchConstraints.from_repo("django/django")
+        tool = LinkSummaryTool(constraints=constraints)
+        result = await tool.execute({
+            "url": "https://github.com/django/django/issues/123",
+            "goal": "read issue",
+        })
+        assert "ACCESS DENIED" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_goal(self):
+        tool = LinkSummaryTool()
+        result = await tool.execute({"url": "https://example.com", "goal": ""})
+        assert "error" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_llm_params_passed(self):
+        """Verify custom llm_params are forwarded to the LLM call."""
+        async def fake_reader(url):
+            return "content"
+
+        reader = LinkReaderTool(reader_fn=fake_reader)
+        mock_client = _make_mock_llm_client()
+
+        tool = LinkSummaryTool(
+            llm_client=mock_client,
+            llm_model="m",
+            reader=reader,
+            llm_params={"temperature": 0.7, "max_tokens": 2048},
+        )
+        await tool.execute({"url": "https://example.com", "goal": "summarize"})
+
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["temperature"] == 0.7
+        assert call_kwargs["max_tokens"] == 2048
+
+    @pytest.mark.asyncio
+    async def test_fallback_when_no_llm(self):
+        """Without LLM client, should return raw content."""
+        async def fake_reader(url):
+            return "Raw page content"
+
+        reader = LinkReaderTool(reader_fn=fake_reader)
+        tool = LinkSummaryTool(reader=reader)
+        result = await tool.execute({
+            "url": "https://example.com",
+            "goal": "summarize",
+        })
+        assert "no LLM configured" in result
+        assert "Raw page content" in result
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_raw_content(self):
+        """When LLM call fails, should return raw content with error note."""
+        async def fake_reader(url):
+            return "Fallback content"
+
+        reader = LinkReaderTool(reader_fn=fake_reader)
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(
+            side_effect=RuntimeError("LLM down")
+        )
+
+        tool = LinkSummaryTool(
+            llm_client=mock_client,
+            llm_model="m",
+            reader=reader,
+            max_attempts=1,
+        )
+        result = await tool.execute({
+            "url": "https://example.com",
+            "goal": "summarize",
+        })
+        assert "Failed to summarize" in result
+        assert "Fallback content" in result
+
+    @pytest.mark.asyncio
+    async def test_fetch_error_propagated(self):
+        """When reader fails, error should be returned directly."""
+        async def failing_reader(url):
+            raise IOError("network error")
+
+        reader = LinkReaderTool(reader_fn=failing_reader, max_attempts=1)
+        tool = LinkSummaryTool(reader=reader)
+        result = await tool.execute({
+            "url": "https://example.com",
+            "goal": "summarize",
+        })
+        assert "Error: failed to fetch" in result

@@ -24,6 +24,35 @@ logger = logging.getLogger(__name__)
 _ENV_PREFIX = "AWE_AGENT__"
 
 
+def load_yaml(path: str | Path) -> dict[str, Any]:
+    """Load a YAML file and return its contents as a dict.
+
+    A lightweight helper for loading simple YAML config files (e.g. LLM
+    settings, prompt configs).  Unlike :func:`load_config`, this does **not**
+    apply env-var overrides, ``!include`` resolution, or Pydantic validation.
+
+    Args:
+        path: Path to the YAML file.
+
+    Returns:
+        Parsed dict, or empty dict if the file is missing or invalid.
+    """
+    p = Path(path)
+    if not p.exists():
+        logger.warning("YAML file not found: %s", p)
+        return {}
+    try:
+        with open(p) as f:
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            logger.warning("YAML file %s did not parse to a dict, got %s", p, type(data).__name__)
+            return {}
+        return data
+    except Exception as exc:
+        logger.warning("Failed to load YAML from %s: %s", p, exc)
+        return {}
+
+
 def load_config(
     config_path: str | Path | None = None,
     overrides: dict[str, Any] | None = None,
