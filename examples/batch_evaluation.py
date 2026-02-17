@@ -53,7 +53,7 @@ async def main() -> None:
     runner = TaskRunner(
         task=MyBenchmark("data/instances.json"),
         agent_factory=lambda: SearchSWEAgent(
-            bash_blacklist=config.security.bash_blacklist,
+            bash_blocklist=config.security.bash_blocklist,
         ),
         llm_config=config.llm,
         runtime_config=config.runtime,

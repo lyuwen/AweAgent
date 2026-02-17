@@ -19,7 +19,7 @@ class AgentConfig(BaseModel):
     tools: list[str] = Field(default_factory=lambda: ["bash", "editor", "think"])
     bash_timeout: int = 120
     max_output_length: int = 32000
-    bash_blacklist: list[str] = Field(default_factory=list)
+    bash_blocklist: list[str] = Field(default_factory=list)
 
 
 class TaskConfig(BaseModel):
@@ -54,7 +54,7 @@ class ExecutionConfig(BaseModel):
 class SecurityConfig(BaseModel):
     """Security configuration."""
 
-    bash_blacklist: list[str] = Field(default_factory=lambda: [
+    bash_blocklist: list[str] = Field(default_factory=lambda: [
         r".*git clone.*",
         r".*git fetch.*",
         r".*git pull.*",

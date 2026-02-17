@@ -39,7 +39,7 @@ execution:
   output_format: jsonl
 
 security:
-  bash_blacklist:
+  bash_blocklist:
     - ".*git clone.*"
     - ".*git fetch.*"
     - ".*git pull.*"

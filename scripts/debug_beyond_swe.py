@@ -163,7 +163,7 @@ async def main() -> None:
             enable_search=config.agent.enable_search,
             bash_timeout=config.agent.bash_timeout,
             max_output_length=config.agent.max_output_length,
-            bash_blacklist=config.security.bash_blacklist or None,
+            bash_blocklist=config.security.bash_blocklist or None,
         )
         llm = LLMClient(config.llm)
         ctx = AgentContext(

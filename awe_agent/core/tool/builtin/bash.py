@@ -18,18 +18,18 @@ _MAX_OUTPUT_LENGTH = 32000
 class BashTool(Tool):
     """Execute bash commands in the runtime session.
 
-    Supports command blacklisting for security (e.g., prevent git clone during eval).
+    Supports command blocking for security (e.g., prevent git clone during eval).
     """
 
     def __init__(
         self,
         timeout: int = 120,
         max_output_length: int = _MAX_OUTPUT_LENGTH,
-        blacklist: list[str] | None = None,
+        blocklist: list[str] | None = None,
     ) -> None:
         self._timeout = timeout
         self._max_output_length = max_output_length
-        self._blacklist = [re.compile(p) for p in (blacklist or [])]
+        self._blocklist = [re.compile(p) for p in (blocklist or [])]
 
     @property
     def name(self) -> str:
@@ -67,8 +67,8 @@ class BashTool(Tool):
         if not command.strip():
             return "Error: empty command."
 
-        # Check blacklist
-        for pattern in self._blacklist:
+        # Check blocklist
+        for pattern in self._blocklist:
             if pattern.match(command):
                 return f"Error: command blocked by security policy: {command}"
 

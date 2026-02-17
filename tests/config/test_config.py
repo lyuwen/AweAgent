@@ -55,10 +55,10 @@ def test_runtime_config_defaults():
     assert cfg.resource_limits.memory == "8Gi"
 
 
-def test_security_config_blacklist():
+def test_security_config_blocklist():
     cfg = SecurityConfig()
-    assert len(cfg.bash_blacklist) > 0
-    assert any("git clone" in p for p in cfg.bash_blacklist)
+    assert len(cfg.bash_blocklist) > 0
+    assert any("git clone" in p for p in cfg.bash_blocklist)
 
 
 def test_load_config_from_yaml():

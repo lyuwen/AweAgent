@@ -94,7 +94,7 @@ class TestSearchConstraints:
         assert any("git\\s+clone" in p for p in patterns)
         assert any("api\\.github\\.com" in p for p in patterns)
 
-    def test_get_bash_blacklist_empty(self):
+    def test_get_bash_blocklist_empty(self):
         c = SearchConstraints()
         assert c.get_bash_blocklist_patterns() == []
 

@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default bash constraints to prevent information leakage during evaluation
-_DEFAULT_BLACKLIST = [
+_DEFAULT_BLOCKLIST = [
     r".*git clone.*",
     r".*git fetch.*",
     r".*git pull.*",
@@ -59,7 +59,7 @@ class SearchSWEAgent(Agent):
         enable_search: Enable web search tools. Defaults to ``False``.
         bash_timeout: Maximum seconds per bash command. Defaults to ``180``.
         max_output_length: Truncate bash output beyond this many characters.
-        bash_blacklist: Regex patterns for blocked bash commands.
+        bash_blocklist: Regex patterns for blocked bash commands.
         enable_think: Include the Think tool. Defaults to ``True``.
         blocked_search_domains: Domains blocked from search results.
 
@@ -83,7 +83,7 @@ class SearchSWEAgent(Agent):
             enable_search=config.agent.enable_search,
             bash_timeout=config.agent.bash_timeout,
             max_output_length=config.agent.max_output_length,
-            bash_blacklist=config.security.bash_blacklist or None,
+            bash_blocklist=config.security.bash_blocklist or None,
             search_constraints=search_constraints,
         )
 
@@ -92,23 +92,23 @@ class SearchSWEAgent(Agent):
         enable_search: bool = False,
         bash_timeout: int = 180,
         max_output_length: int = 32000,
-        bash_blacklist: list[str] | None = None,
+        bash_blocklist: list[str] | None = None,
         enable_think: bool = False,
         search_constraints: SearchConstraints | None = None,
     ) -> None:
         self._enable_search = enable_search
 
-        # Extend bash blacklist with constraint-derived patterns
-        effective_blacklist = list(bash_blacklist or _DEFAULT_BLACKLIST)
+        # Extend bash blocklist with constraint-derived patterns
+        effective_blocklist = list(bash_blocklist or _DEFAULT_BLOCKLIST)
         if search_constraints is not None:
-            effective_blacklist.extend(search_constraints.get_bash_blocklist_patterns())
+            effective_blocklist.extend(search_constraints.get_bash_blocklist_patterns())
 
         # Core tools
         self._tools: list[Tool] = [
             BashTool(
                 timeout=bash_timeout,
                 max_output_length=max_output_length,
-                blacklist=effective_blacklist,
+                blocklist=effective_blocklist,
             ),
             FileEditorTool(),
         ]

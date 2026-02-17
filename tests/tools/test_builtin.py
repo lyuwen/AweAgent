@@ -31,8 +31,8 @@ async def test_bash_empty_command():
 
 
 @pytest.mark.asyncio
-async def test_bash_blacklist():
-    tool = BashTool(blacklist=[r".*rm -rf.*"])
+async def test_bash_blocklist():
+    tool = BashTool(blocklist=[r".*rm -rf.*"])
     session = MockRuntimeSession()
     result = await tool.execute({"command": "rm -rf /"}, session=session)
     assert "blocked" in result.lower()

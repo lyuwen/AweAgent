@@ -19,7 +19,7 @@ StepCallback = Callable[..., Coroutine[Any, Any, Any]]
 class BashConstraints:
     """Security constraints for bash execution."""
 
-    blacklist: list[str] = field(default_factory=list)
+    blocklist: list[str] = field(default_factory=list)
     blocked_urls: list[str] = field(default_factory=list)
 
 
