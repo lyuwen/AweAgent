@@ -16,8 +16,8 @@ class AgentConfig(BaseModel):
     type: str = "search_swe"
     max_steps: int = 100
     enable_search: bool = False
-    tools: list[str] = Field(default_factory=lambda: ["bash", "editor", "think"])
-    bash_timeout: int = 120
+    tools: list[str] = Field(default_factory=lambda: ["execute_bash", "str_replace_editor", "think"])
+    bash_timeout: int = 180
     max_output_length: int = 32000
     bash_blocklist: list[str] = Field(default_factory=list)
 

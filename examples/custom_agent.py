@@ -12,7 +12,7 @@ from awe_agent.core.agent import Action, Agent, AgentContext, AgentLoop
 from awe_agent.core.llm import LLMClient, LLMConfig, Message
 from awe_agent.core.runtime import RuntimeConfig
 from awe_agent.core.runtime.docker import DockerRuntime
-from awe_agent.core.tool.builtin.bash import BashTool
+from awe_agent.core.tool.code import ExecuteBashTool
 from awe_agent.core.tool.protocol import Tool
 
 
@@ -26,7 +26,7 @@ class MySimpleAgent(Agent):
         )
 
     def get_tools(self) -> list[Tool]:
-        return [BashTool(timeout=60)]
+        return [ExecuteBashTool(timeout=60)]
 
     async def step(self, context: AgentContext) -> Action:
         response = await context.llm.chat(

@@ -12,8 +12,7 @@ from awe_agent.core.agent.trajectory import Action
 from awe_agent.core.llm.client import LLMClient
 from awe_agent.core.llm.config import LLMConfig
 from awe_agent.core.llm.types import LLMResponse, Message, TokenUsage, ToolCall
-from awe_agent.core.tool.builtin.bash import BashTool
-from awe_agent.core.tool.builtin.think import ThinkTool
+from awe_agent.core.tool.code import ExecuteBashTool, ThinkTool
 from awe_agent.scaffold.search_swe.agent import SearchSWEAgent
 from tests.conftest import MockRuntimeSession
 
@@ -74,7 +73,7 @@ async def test_agent_loop_tool_then_finish(mock_llm, mock_session):
         if call_count == 1:
             return LLMResponse(
                 content="Let me check the code.",
-                tool_calls=[ToolCall(id="tc1", name="bash", arguments='{"command": "ls /testbed"}')],
+                tool_calls=[ToolCall(id="tc1", name="execute_bash", arguments='{"command": "ls /testbed"}')],
                 usage=TokenUsage(prompt_tokens=10, completion_tokens=20),
             )
         else:
@@ -110,7 +109,7 @@ async def test_agent_loop_max_steps(mock_llm, mock_session):
     async def mock_chat(messages, tools=None, **kwargs):
         return LLMResponse(
             content="Trying again...",
-            tool_calls=[ToolCall(id="tc1", name="think", arguments='{"thought": "hmm"}')],
+            tool_calls=[ToolCall(id="tc1", name="think", arguments='{"content": "hmm"}')],
             usage=TokenUsage(prompt_tokens=10, completion_tokens=20),
         )
 
@@ -166,7 +165,7 @@ async def test_agent_loop_step_callbacks(mock_llm, mock_session):
         if call_count <= 2:
             return LLMResponse(
                 content=f"Step {call_count}",
-                tool_calls=[ToolCall(id=f"tc{call_count}", name="think", arguments='{"thought": "ok"}')],
+                tool_calls=[ToolCall(id=f"tc{call_count}", name="think", arguments='{"content": "ok"}')],
                 usage=TokenUsage(prompt_tokens=10, completion_tokens=10),
             )
         return LLMResponse(
@@ -200,7 +199,7 @@ async def test_single_step_for_rl(mock_llm, mock_session):
     """run_single_step works for RL integration."""
     mock_llm.chat = AsyncMock(return_value=LLMResponse(
         content="Thinking...",
-        tool_calls=[ToolCall(id="tc1", name="think", arguments='{"thought": "analyzing"}')],
+        tool_calls=[ToolCall(id="tc1", name="think", arguments='{"content": "analyzing"}')],
         usage=TokenUsage(prompt_tokens=10, completion_tokens=20),
     ))
 

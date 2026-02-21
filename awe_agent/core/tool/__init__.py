@@ -2,9 +2,9 @@
 
 Usage:
     from awe_agent.core.tool import Tool, tool_registry
-    from awe_agent.core.tool.builtin.bash import BashTool
+    from awe_agent.core.tool.code import ExecuteBashTool, StrReplaceEditorTool, ThinkTool
 
-    bash = BashTool(timeout=120)
+    bash = ExecuteBashTool(timeout=180)
     result = await bash.execute({"command": "ls"}, session=session)
 """
 

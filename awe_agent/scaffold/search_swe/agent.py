@@ -19,9 +19,7 @@ from typing import TYPE_CHECKING, Any
 from awe_agent.core.agent.context import AgentContext
 from awe_agent.core.agent.protocol import Agent
 from awe_agent.core.agent.trajectory import Action
-from awe_agent.core.tool.builtin.bash import BashTool
-from awe_agent.core.tool.builtin.editor import FileEditorTool
-from awe_agent.core.tool.builtin.think import ThinkTool
+from awe_agent.core.tool.code import ExecuteBashTool, StrReplaceEditorTool, ThinkTool
 from awe_agent.core.tool.protocol import Tool
 from awe_agent.core.tool.search import LinkSummaryTool, SearchConstraints, SearchTool
 from awe_agent.scaffold.search_swe.prompts.config import resolve_from_task_info
@@ -105,12 +103,12 @@ class SearchSWEAgent(Agent):
 
         # Core tools
         self._tools: list[Tool] = [
-            BashTool(
+            ExecuteBashTool(
                 timeout=bash_timeout,
                 max_output_length=max_output_length,
                 blocklist=effective_blocklist,
             ),
-            FileEditorTool(),
+            StrReplaceEditorTool(),
         ]
 
         if enable_think:
