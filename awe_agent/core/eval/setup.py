@@ -64,7 +64,7 @@ class PreAgentSetup:
     async def run_setup_commands(self, commands: list[str]) -> None:
         """Execute setup commands (from ``instance.setup_commands``)."""
         for cmd in commands:
-            result = await self.session.execute(cmd, timeout=300)
+            result = await self.session.execute(cmd, self.workdir, timeout=300)
             if not result.success:
                 logger.warning(
                     "Setup command failed (exit %d): %s -> %s",
