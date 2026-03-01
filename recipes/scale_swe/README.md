@@ -2,11 +2,24 @@
 
 Run the ScaleSWE benchmark — a large-scale SWE-bench style coding evaluation. Uses the SearchSWE agent scaffold in non-search mode with CodeAct XML tool calling.
 
+## Dataset
+
+Download the ScaleSWE dataset from the [Hugging Face](https://huggingface.co/datasets/AweAI-Team/Scale-SWE):
+
+```python
+from datasets import load_dataset
+
+# See the collection page for available splits
+dataset = load_dataset("AweAI-Team/Scale-SWE")
+```
+
+Or download the JSONL file directly from the Hugging Face repo page.
+
 ## Prerequisites
 
 1. **Docker** — each instance runs in an isolated container
 2. **LLM API** — configure in `configs/llm/` (default: Azure OpenAI)
-3. **Data file** — ScaleSWE JSONL format
+3. **Data file** — ScaleSWE JSONL (see [Dataset](#dataset) above)
 
 ### Environment Variables
 

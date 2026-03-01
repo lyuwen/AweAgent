@@ -2,11 +2,23 @@
 
 Run the BeyondSWE benchmark with the SearchSWE agent scaffold. Supports four task types (Doc2Repo, CrossRepo, DepMigrate, DomainFix) in both search-enabled and non-search modes.
 
+## Dataset
+
+Download the BeyondSWE dataset from [Hugging Face](https://huggingface.co/datasets/AweAI-Team/BeyondSWE):
+
+```python
+from datasets import load_dataset
+
+dataset = load_dataset("AweAI-Team/BeyondSWE")
+```
+
+Or download the JSONL file directly from the Hugging Face repo page.
+
 ## Prerequisites
 
 1. **Docker** — each instance runs in an isolated container
 2. **LLM API** — configure Azure OpenAI or another backend (see `configs/llm/`)
-3. **Data file** — BeyondSWE JSONL format
+3. **Data file** — BeyondSWE JSONL (see [Dataset](#dataset) above)
 4. **Docker images** — must be available locally (use `crane pull` + `docker load` if network is restricted)
 
 ### Environment Variables

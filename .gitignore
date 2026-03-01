@@ -36,3 +36,4 @@ results/
 # Environment
 .env
 .env.*
+!.env.example

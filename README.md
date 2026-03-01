@@ -1,17 +1,27 @@
+<div align="center">
+
 # AweAgent
 
-An extensible agent framework for software engineering benchmarks. Supports [BeyondSWE](https://github.com/AweAI-Team/BeyondSWE) (doc2repo, cross-repo, dep-migrate, domain-fix) and [ScaleSWE](https://github.com/AweAI-Team/ScaleSWE) with pluggable LLM backends, Docker-isolated execution, and optional web-search-augmented agents.
+**A general-purpose agent framework with pluggable scaffolds and reproducible evaluation.**
 
-## Features
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+<!-- [![GitHub stars](https://img.shields.io/github/stars/AweAI-Team/AweAgent.svg?style=social)](https://github.com/AweAI-Team/AweAgent) -->
 
-- **Multi-benchmark support** — BeyondSWE (4 task types) and ScaleSWE out of the box
-- **Pluggable LLM backends** — OpenAI, Azure OpenAI, Volcengine Ark, ...
-- **Docker isolation** — each instance runs in its own container with resource limits
-- **Search-augmented agents** — optional web search + link summary tools
-- **Batch execution** — concurrent evaluation with configurable parallelism
-- **Plugin architecture** — LLM backends, runtimes, agents, evaluators, tools are all extensible via entry-points
+</div>
 
-## Architecture
+AweAgent provides two core capabilities:
+
+- **Pluggable Agent Scaffolds** — Modular agent loop with extensible tools (bash, editor, search, think), pluggable LLM backends (OpenAI, Azure, Ark, SGLang), and configurable context management.
+- **Reproducible Evaluation** — Docker-isolated execution, built-in evaluators, batch runner with concurrent execution, and structured result / trajectory output.
+
+AweAgent currently ships with [BeyondSWE](https://github.com/AweAI-Team/BeyondSWE) and [ScaleSWE](https://github.com/AweAI-Team/ScaleSWE) benchmark support.
+
+## :newspaper: News
+
+- `[2026-03-01]` 🎉 Initial release — SearchSWE agent scaffold (OpenHands-compatible CodeAct XML) with [BeyondSWE](https://github.com/AweAI-Team/BeyondSWE) & [ScaleSWE](https://github.com/AweAI-Team/ScaleSWE) benchmark support
+
+## :building_construction: Architecture
 
 ```
 awe_agent/
@@ -32,31 +42,52 @@ awe_agent/
 
 configs/             # YAML configurations (LLM, task, runtime)
 recipes/             # Reproducible entry points
-  beyond_swe/        #   BeyondSWE runner (prompt / debug / batch / dry-run)
+  beyond_swe/        #   BeyondSWE runner
   scale_swe/         #   ScaleSWE runner
 ```
 
-## Prerequisites
+## :jigsaw: Supported Scaffolds
 
-- **Python >= 3.11**
-- **Docker** — each benchmark instance runs in an isolated container
-- **LLM API access** — OpenAI, Azure OpenAI, or another supported backend
+### SearchSWE
 
-## Installation
+The built-in **SearchSWE** agent scaffold (`awe_agent/scaffold/search_swe/`) is a modular agent loop that can operate in two modes — switch between them with a single config flag:
+
+| Mode | `enable_search` | `tool_call_format` | Description |
+|------|:---:|---|---|
+| **SearchSWE** | `true` | `openai_function` | Full tool set including web search & link summary |
+| **OpenHands-style** | `false` | `codeact_xml` | CodeAct XML format, compatible with OpenHands agent behavior |
+
+**Tool Blocks.** The agent composes its tool set from independent, self-contained tool blocks. Each block implements a unified `Tool` protocol (name, JSON Schema parameters, async execute) and is registered via a plugin registry with entry-point discovery:
+
+| Tool | Name | Description |
+|------|------|-------------|
+| Bash | `execute_bash` | Persistent shell session inside Docker with output truncation, timeout control, and regex-based command blocklist |
+| Editor | `str_replace_editor` | File viewer/editor with `view`, `create`, `str_replace`, and `insert` sub-commands |
+| Search | `search` | Web search with anti-leak filtering (auto-blocks target repo URLs). Only active when `enable_search: true` |
+| Link Summary | `link_summary` | Fetch a URL and summarize content via a dedicated LLM. Only active when `enable_search: true` |
+| Think | `think` | Reasoning scratchpad — no environment side-effects, helps the agent plan before acting |
+| Finish | `finish` | Signals task completion and triggers evaluation |
+
+Adding a custom tool is as simple as implementing the `Tool` protocol and registering it via a Python entry-point — no changes to the agent loop required.
+
+**Isolated Evaluation.** After the agent finishes, evaluation runs in a **separate Docker container** to ensure a clean, tamper-proof environment:
+
+1. Check out the base commit in a fresh container
+2. Apply the agent-generated patch (6 auto-fallback strategies)
+3. Restore original test files (prevents the agent from gaming tests)
+4. Run fail-to-pass & pass-to-pass test suites via an injected pytest runner
+5. Report structured results (score, pass/fail details, trajectory)
+
+## :rocket: Installation
 
 ### uv (Recommended)
 
 ```bash
-# Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone and install
 git clone https://github.com/AweAI-Team/AweAgent.git && cd AweAgent
 uv venv --python 3.11
 uv pip install -e ".[dev]"
-
-# Verify
-uv run awe-agent info
 ```
 
 ### pip
@@ -64,231 +95,48 @@ uv run awe-agent info
 ```bash
 git clone https://github.com/AweAI-Team/AweAgent.git && cd AweAgent
 pip install -e ".[dev]"
-
-# Verify
-awe-agent info
 ```
 
-> **Why editable install?** AweAgent uses entry-points for plugin discovery. Without `pip install -e .`, the plugin registry cannot find LLM backends, agents, or tools and will raise `KeyError`.
+> **Why editable install?** AweAgent uses entry-points for plugin discovery. Without `-e`, the plugin registry cannot find LLM backends, agents, or tools.
 
-## Quick Start
+## :clipboard: Supported Benchmarks
 
-### 1. Configure LLM
+| Benchmark | Description | Agent | Dataset | Guide |
+|-----------|-------------|-------|---------|-------|
+| BeyondSWE | Doc2Repo, CrossRepo, DepMigrate, DomainFix | SearchSWE (with web search) | [Hugging Face](https://huggingface.co/datasets/AweAI-Team/BeyondSWE) | [README](recipes/beyond_swe/) |
+| ScaleSWE | Large-scale SWE-bench style datasets (20k instances) | SearchSWE (CodeAct XML) | [Hugging Face](https://huggingface.co/datasets/AweAI-Team/Scale-SWE) | [README](recipes/scale_swe/) |
+
+### Download Data
 
 ```bash
-# OpenAI
+# BeyondSWE
+from datasets import load_dataset
+dataset = load_dataset("AweAI-Team/BeyondSWE")
+
+# ScaleSWE — see the Hugging Face collection for available splits
+# https://huggingface.co/datasets/AweAI-Team/Scale-SWE
+```
+
+### Quick Example
+
+```bash
+# Configure LLM
 export OPENAI_API_KEY="sk-..."
 
-# Or Azure OpenAI
-export AZURE_OPENAI_API_KEY="..."
-export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com"
-```
-
-### 2. Run BeyondSWE
-
-```bash
-# List all instances (no Docker needed)
+# List instances (no Docker needed)
 python recipes/beyond_swe/run.py \
     --data-file /path/to/beyondswe.jsonl --mode dry-run
 
-# Inspect prompt for one instance (no Docker needed)
-python recipes/beyond_swe/run.py \
-    --data-file /path/to/beyondswe.jsonl \
-    --instance-id <INSTANCE_ID> --mode prompt
-
-# Debug a single instance (full agent + eval trace)
-python recipes/beyond_swe/run.py \
-    --data-file /path/to/beyondswe.jsonl \
-    --instance-id <INSTANCE_ID> --mode debug \
-    --model gpt-4o --max-steps 30 --verbose
-
-# Batch run (search-enabled, default)
+# Batch run
 python recipes/beyond_swe/run.py \
     --data-file /path/to/beyondswe.jsonl --mode batch
-
-# Batch run (search-disabled, OpenHands style)
-python recipes/beyond_swe/run.py \
-    --data-file /path/to/beyondswe.jsonl --mode batch --no-search
 ```
 
-### 3. Run ScaleSWE
+See each benchmark's guide above for full setup, CLI arguments, and output format.
 
-```bash
-# List all instances
-python recipes/scale_swe/run.py \
-    --data-file /path/to/scaleswe.jsonl --mode dry-run
-
-# Debug a single instance
-python recipes/scale_swe/run.py \
-    --data-file /path/to/scaleswe.jsonl \
-    --instance-id <INSTANCE_ID> --mode debug --verbose
-
-# Batch run
-python recipes/scale_swe/run.py \
-    --data-file /path/to/scaleswe.jsonl --mode batch
-```
-
-### 4. Using the CLI Directly
-
-```bash
-export DATA_FILE=/path/to/data.jsonl
-
-# BeyondSWE
-awe-agent run -c configs/tasks/beyondswe_searchswe.yaml
-awe-agent run -c configs/tasks/beyondswe_searchswe.yaml --dry-run
-
-# ScaleSWE
-awe-agent run -c configs/tasks/scale_swe.yaml
-```
-
-## Data Format
-
-### BeyondSWE JSONL
-
-Each line in the JSONL file represents one task instance. BeyondSWE supports 4 task types: `doc2repo`, `crossrepo`, `depmigrate`, `domainfix`.
-
-```jsonc
-{
-  "instance_id": "pylons_plaster_pastedeploy_pr14",
-  "task": "crossrepo",                          // doc2repo | crossrepo | depmigrate | domainfix
-  "repo": "pylons/plaster_pastedeploy",
-  "image": "beyondswe/crossrepo:pylons_plaster", // Docker image (pre-built)
-  "workdir": "/workspace",
-  "base_commit": "abc1234...",
-  "problem_statement": "Description of the issue to solve...",
-  "pre_commands": "cd /workspace && pip install -e .",
-
-  // Evaluation fields
-  "f2p_patch": "diff --git ...",                 // Patch introducing failing tests
-  "f2p_script": "import pytest\n...",            // Test script content
-  "FAIL_TO_PASS": "[\"test_foo\", \"test_bar\"]", // Tests that should pass after fix
-  "PASS_TO_PASS": "[\"test_existing\"]",          // Tests that must not regress
-
-  // Doc2Repo specific (only for task=doc2repo)
-  "REPO_DOCUMENT_CONTENT": "# Specification\n...", // Repo specification document
-  "test_suite": "test_suite_name.zip",             // Test suite archive
-  "test_suite_num": 42                             // Expected number of tests
-}
-```
-
-**Task type details:**
-
-| Task Type | Description | Key Fields |
-|-----------|-------------|------------|
-| `doc2repo` | Build a repository from a specification document | `REPO_DOCUMENT_CONTENT`, `test_suite`, `test_suite_num` |
-| `crossrepo` | Fix issues spanning multiple files/modules | `problem_statement`, `f2p_patch`, `f2p_script` |
-| `depmigrate` | Dependency migration tasks | `problem_statement`, `f2p_patch`, `f2p_script` |
-| `domainfix` | Domain-specific technical problems | `problem_statement`, `f2p_patch`, `f2p_script` |
-
-> **Doc2Repo evaluation** requires a local directory containing test suite ZIP files. Set `BEYONDSWE_TEST_SUITE_DIR` or configure `test_suite_dir` in the YAML config.
-
-### ScaleSWE JSONL
-
-ScaleSWE follows a SWE-bench-style format with a single task type (issue-resolving).
-
-```jsonc
-{
-  "instance_id": "django__django-12345",
-  "user": "django",                             // GitHub user/org
-  "repo": "django",                             // Repository name
-  "image_url": "scaleswe/django:12345",          // Docker image (pre-built)
-  "workdir": "/testbed",
-  "parent_commit": "def5678...",                  // Base commit to work from
-  "problem_statement": "Description of the issue...",
-  "pre_commands": "cd /testbed && git checkout def5678...",
-
-  // Evaluation fields
-  "f2p_patch": "diff --git ...",
-  "f2p_script": "import pytest\n...",
-  "FAIL_TO_PASS": "[\"test_foo\"]",
-  "PASS_TO_PASS": "[\"test_bar\"]"
-}
-```
-
-**Key differences from BeyondSWE:**
-
-| Field | BeyondSWE | ScaleSWE |
-|-------|-----------|----------|
-| Base commit | `base_commit` | `parent_commit` |
-| Docker image | `image` | `image_url` |
-| Repository | `repo` (full name) | `user` + `repo` (combined) |
-| Default workdir | `/workspace` | `/testbed` |
-| Task types | 4 types | Single (issue-resolving) |
-| Search mode | Configurable | Always disabled |
-
-### Docker Images
-
-Both benchmarks require pre-built Docker images for each instance. The image name is specified in the JSONL data (`image` or `image_url` field). Images must be available locally before running.
-
-```bash
-# If images are in a remote registry
-docker pull <image:tag>
-
-# If network-restricted, download + load manually
-crane pull <image:tag> /tmp/img.tar
-docker load -i /tmp/img.tar
-```
-
-## Configuration
+## :gear: Configuration
 
 Configs are YAML files with environment variable substitution (`${VAR}`, `${VAR:-default}`) and `!include` support.
-
-### BeyondSWE Config
-
-```yaml
-# configs/tasks/beyondswe_searchswe.yaml
-llm: "!include ../llm/openai.yaml"
-
-runtime:
-  backend: docker
-  timeout: 14400
-  resource_limits:
-    cpu: "4"
-    memory: "8Gi"
-
-agent:
-  type: search_swe
-  max_steps: 200
-  enable_search: true         # Set false for OpenHands-style (no search)
-  bash_timeout: 1200
-
-task:
-  type: beyond_swe
-  dataset_id: beyond_swe
-  data_file: ${DATA_FILE}
-  # test_suite_dir: /path/to/doc2repo_test_suite  # or set BEYONDSWE_TEST_SUITE_DIR
-
-eval:
-  enabled: true
-  timeout: 3600
-
-execution:
-  max_concurrent: 50
-  output_path: ./results/beyondswe_searchswe
-```
-
-### ScaleSWE Config
-
-```yaml
-# configs/tasks/scale_swe.yaml
-llm: "!include ../llm/openai.yaml"
-
-agent:
-  type: search_swe
-  max_steps: 200
-  enable_search: false
-  bash_timeout: 1200
-  tool_call_format: codeact_xml    # Uses CodeAct XML format
-
-task:
-  type: scale_swe
-  dataset_id: scale_swe
-  data_file: ${DATA_FILE}
-
-execution:
-  max_concurrent: 50
-  output_path: ./results/scale_swe
-```
 
 ### LLM Backends
 
@@ -299,121 +147,57 @@ execution:
 | Volcengine Ark | `configs/llm/ark.yaml` | `ARK_API_KEY`, `ARK_MODEL_ID` |
 | SGLang | `configs/llm/sglang.yaml` | (self-hosted endpoint) |
 
-### Search Mode (BeyondSWE only)
+### Environment Variables
 
-When `enable_search: true`, the agent gains access to web search tools. Requires additional environment variables:
-
-```bash
-# Search backend (SerpAPI)
-export SERPAPI_API_KEY="your-serpapi-key"
-
-# Reader backend (Jina)
-export JINA_API_KEY="your-jina-key"
-
-# Link summary LLM (optional)
-export LINK_SUMMARY_CONFIG_PATH="configs/llm/link_summary/azure.yaml"
-export LINK_SUMMARY_MODEL="gpt-4o-mini"
-```
-
-## Modes
-
-Both `recipes/beyond_swe/run.py` and `recipes/scale_swe/run.py` support the same 4 modes:
-
-| Mode | Description | Docker Required |
-|------|-------------|:-:|
-| `dry-run` | List all instances from the JSONL file | No |
-| `prompt` | Print the agent prompt and task_info for one instance | No |
-| `debug` | Full single-instance agent run with step-by-step trace | Yes |
-| `batch` | Concurrent batch execution, outputs JSONL results | Yes |
-
-### CLI Arguments (recipes)
-
-```
---data-file PATH            JSONL data file (required)
---config / -c PATH          Config file (see defaults per recipe)
---mode MODE                 prompt | debug | batch | dry-run (default: prompt)
---instance-id ID            Single instance (prompt / debug)
---instance-ids ID [ID ...]  Multiple instances (batch, optional filter)
---model MODEL               Override LLM model
---max-steps N               Override max agent steps
---max-concurrent N          Override concurrency (batch)
---output DIR                Override output directory
---enable-search             Force-enable search tools (BeyondSWE only)
---no-search                 Force-disable search tools (BeyondSWE only)
---skip-eval                 Skip evaluation after agent run
---no-trajectories           Don't save per-instance trajectory files
---verbose                   DEBUG level logging
-```
-
-## Output
-
-Batch results are saved to the output directory:
-
-```
-results/<run_id>/
-  results.jsonl              # One line per instance
-  config.json                # Config snapshot for reproducibility
-  trajectories/              # Per-instance agent traces (optional)
-    <instance_id>.json
-```
-
-### results.jsonl format
-
-Each line contains:
-
-```jsonc
-{
-  "instance_id": "django__django-12345",
-  "success": true,
-  "score": 1.0,               // 1.0 = all tests pass, 0.0 = fail
-  "finish_reason": "success",  // success | max_steps | error | context_overflow
-  "error": null,
-  "duration": 123.4,
-  "patch": "diff --git ..."    // Agent-generated patch
-}
-```
-
-### Trajectory files
-
-Each trajectory JSON contains the full step-by-step agent trace:
-
-```jsonc
-{
-  "instance_id": "...",
-  "trajectory": [
-    {
-      "step": 1,
-      "action": {
-        "type": "tool_call",
-        "content": "Let me explore the repository structure...",
-        "tool_calls": [{"name": "execute_bash", "arguments": {"command": "ls -la"}}]
-      },
-      "observations": ["total 64\ndrwxr-xr-x ..."]
-    }
-    // ...
-  ],
-  "eval_result": {
-    "accepted": true,
-    "score": 1.0,
-    "details": { "f2p_count": 3, "p2p_count": 10 }
-  }
-}
-```
-
-## Development
+Copy [`.env.example`](.env.example) to `.env` and fill in your values:
 
 ```bash
-# Run tests
-pytest
-
-# Lint & format
-ruff check awe_agent/
-ruff format awe_agent/
-
-# Type check
-mypy awe_agent/
+cp .env.example .env
 ```
 
-## License
+The `.env.example` is organized into three sections:
 
-Apache-2.0
+1. **LLM Backend** (pick one) — set the API key and endpoint for your chosen backend:
+   ```bash
+   # OpenAI
+   OPENAI_API_KEY=sk-...
+
+   # Or Azure OpenAI
+   AZURE_OPENAI_API_KEY=your-key
+   AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+   ```
+
+2. **Task Data** — path to your benchmark JSONL file:
+   ```bash
+   DATA_FILE=/path/to/data.jsonl
+   ```
+
+3. **Search Tools** (optional, BeyondSWE search mode only) — required when running with `enable_search: true`:
+   ```bash
+   SERPAPI_API_KEY=your-serpapi-key
+   JINA_API_KEY=your-jina-key          # optional, 20 RPM free without key
+   ```
+
+See each [benchmark guide](#clipboard-supported-benchmarks) for the full list of variables.
+
+## :world_map: Roadmap
+
+Our long-term goal is to build practical, general-purpose agents and optimize them with reinforcement learning.
+
+**Agent Scaffolds & Capabilities**
+- [x] SearchSWE — coding agent with optional web search augmentation
+- [ ] deep research Agent
+- [ ] terminal agent
+
+**Evaluation & Optimization**
+- [x] BeyondSWE & ScaleSWE benchmark support
+- [ ] More benchmarks — wider task coverage and domain diversity
+- [ ] Agentic RL — scalable reinforcement learning infrastructure for agent optimization
+
+
+## 📄 License
+This project is released under the [Apache-2.0 License](LICENSE).
+
+## 📨 Contact
+
+For any questions or feedback, please reach out to us at `gx.chen.chn@gmail.com`.
