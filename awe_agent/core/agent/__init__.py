@@ -10,6 +10,7 @@ from awe_agent.core.agent.context import AgentContext, BashConstraints
 from awe_agent.core.agent.loop import AgentLoop, AgentResult
 from awe_agent.core.agent.protocol import Agent
 from awe_agent.core.agent.stats import RunStats
+from awe_agent.core.agent.training import TrainingState
 from awe_agent.core.agent.trajectory import Action, Trajectory, TrajectoryStep
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "RunStats",
     "Trajectory",
     "TrajectoryStep",
+    "TrainingState",
 ]

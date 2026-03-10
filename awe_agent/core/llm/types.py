@@ -87,7 +87,9 @@ class LLMResponse:
     finish_reason: str | None = None  # "stop" | "length" | "tool_calls" | etc.
     raw: Any = None  # Raw response for debugging
 
-    # RL-related fields (populated when return_tokens/return_logprobs enabled)
+    # RL-related fields (populated by SGLang backend when return_tokens/logprobs enabled)
     prompt_token_ids: list[int] | None = None
     completion_token_ids: list[int] | None = None
     logprobs: list[float] | None = None
+    weight_version: str | None = None
+    finish_status: str | None = None  # "stop" | "length"

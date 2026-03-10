@@ -195,20 +195,21 @@ def check_f2p_p2p(
 
 def build_pytest_command(
     test_ids: list[str],
-    workdir: str,
     extra_args: str = "",
 ) -> str:
     """Build a shell command that runs specific pytest tests.
 
+    The returned command does NOT include ``cd``; callers should pass
+    ``cwd=workdir`` to ``session.execute()``.
+
     Args:
         test_ids: Pytest node IDs to run.
-        workdir: Project root inside the container.
         extra_args: Additional flags appended to the ``pytest`` invocation.
     """
     if not test_ids:
-        return f"cd {workdir} && echo 'No tests specified'"
+        return "echo 'No tests specified'"
     tests = " ".join(shlex.quote(t) for t in test_ids)
-    cmd = f"cd {workdir} && python -m pytest {tests} --tb=short --no-header -q"
+    cmd = f"python -m pytest {tests} --tb=short --no-header -q"
     if extra_args:
         cmd += f" {extra_args}"
     return cmd
@@ -224,15 +225,15 @@ async def restore_test_files(session: RuntimeSession, workdir: str) -> None:
     the repository (common for projects with non-standard layouts).
     """
     await session.execute(
-        f"cd {workdir} && "
-        f"git checkout HEAD -- tests/ test/ Test/ Tests/ "
-        f"2>/dev/null || true"
+        "git checkout HEAD -- tests/ test/ Test/ Tests/ "
+        "2>/dev/null || true",
+        cwd=workdir,
     )
     await session.execute(
-        f"cd {workdir} && "
-        f"git checkout HEAD -- "
-        f"$(git ls-files '**/test_*.py' '**/*_test.py' '**/conftest.py' 2>/dev/null) "
-        f"2>/dev/null || true"
+        "git checkout HEAD -- "
+        "$(git ls-files '**/test_*.py' '**/*_test.py' '**/conftest.py' 2>/dev/null) "
+        "2>/dev/null || true",
+        cwd=workdir,
     )
 
 
@@ -273,8 +274,8 @@ async def run_f2p_p2p_eval(
     f2p_summary = PytestSummary()
     f2p_output = ""
     if f2p_ids:
-        cmd = build_pytest_command(f2p_ids, instance.workdir)
-        result = await session.execute(cmd, timeout=timeout)
+        cmd = build_pytest_command(f2p_ids)
+        result = await session.execute(cmd, cwd=instance.workdir, timeout=timeout)
         f2p_output = result.output
         f2p_summary = parse_pytest_summary(f2p_output)
 
@@ -282,8 +283,8 @@ async def run_f2p_p2p_eval(
     p2p_summary = PytestSummary()
     p2p_output = ""
     if p2p_ids:
-        cmd = build_pytest_command(p2p_ids, instance.workdir)
-        result = await session.execute(cmd, timeout=timeout)
+        cmd = build_pytest_command(p2p_ids)
+        result = await session.execute(cmd, cwd=instance.workdir, timeout=timeout)
         p2p_output = result.output
         p2p_summary = parse_pytest_summary(p2p_output)
 
@@ -465,8 +466,8 @@ async def run_tests_with_runner(
 
     # 3. Execute runner
     result = await session.execute(
-        f"cd {workdir} && python /tmp/_awe_pytest_runner.py /tmp/_awe_test_config.json",
-        timeout=timeout,
+        "python /tmp/_awe_pytest_runner.py /tmp/_awe_test_config.json",
+        cwd=workdir, timeout=timeout,
     )
     raw_output = result.output
 

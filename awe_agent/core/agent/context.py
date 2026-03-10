@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
+from awe_agent.core.agent.training import TrainingState
 from awe_agent.core.agent.trajectory import Trajectory
 from awe_agent.core.llm.client import LLMClient
 from awe_agent.core.llm.types import Message
@@ -59,6 +60,9 @@ class AgentContext:
 
     # Tool call format (None = default OpenAI function calling)
     tool_call_format: Any = None
+
+    # RL training state (None = inference mode, no token-level tracking)
+    training: TrainingState | None = None
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
         """Get OpenAI function calling schemas for all tools."""

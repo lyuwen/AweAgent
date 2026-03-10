@@ -150,7 +150,7 @@ class BeyondSWEEvaluator(PatchTestEvaluator):
 
         # ── 1. pip install -e . ─────────────────────────────────────────
         install_result = await session.execute(
-            f"cd {workdir} && pip install -e .", timeout=300,
+            f"pip install -e .", cwd=workdir, timeout=300,
         )
         if not install_result.success:
             return EvalResult(
@@ -180,15 +180,15 @@ class BeyondSWEEvaluator(PatchTestEvaluator):
         # ── 3. Upload ZIP + unzip in container ─────────────────────────
         await session.upload_file("/tmp/_awe_test_suite.zip", zip_bytes)
         await session.execute(
-            f"cd {workdir} && unzip -o /tmp/_awe_test_suite.zip",
-            timeout=600,
+            "unzip -o /tmp/_awe_test_suite.zip",
+            cwd=workdir, timeout=600,
         )
 
         # ── 4. Execute the eval script from the ZIP ────────────────────
         timeout = min(self._timeout, _DOC2REPO_TIMEOUT)
         result = await session.execute(
-            f"cd {workdir} && python realswe_eval_script.py",
-            timeout=timeout,
+            "python realswe_eval_script.py",
+            cwd=workdir, timeout=timeout,
         )
 
         # ── 5. Parse results and compute pass_rate ──────────────────────

@@ -4,6 +4,14 @@ Design:
 - AgentLoop owns the loop; Agent owns the policy (step function).
 - This separation allows RL frameworks to control the loop externally.
 - Supports step callbacks for intermediate evaluation, data collection, etc.
+
+Training mode:
+- When ``context.training`` is set (a :class:`TrainingState`), the loop
+  automatically tracks token-level RL data: prompt_token_ids,
+  response_token_ids, loss_mask, and rollout_log_probs.
+- The loop tokenizes the initial prompt, accumulates model-generated
+  tokens (mask=1) after each LLM call, and tokenizes tool observations
+  (mask=0) after each execution — fully transparent to the Agent.
 """
 
 from __future__ import annotations
@@ -11,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -68,17 +77,19 @@ class AgentLoop:
         1. **Context length exceeded** — the previous LLM call's
            ``prompt_tokens`` exceeded ``max_context_length``.  Checked
            *before* the next LLM call to avoid wasting an API request.
-        2. **Explicit finish** — ``action.type == "finish"`` (agent called the
+        2. **Token budget exhausted** (training mode only) — SGLang returned
+           ``finish_status="length"``, meaning the token budget is used up.
+        3. **Explicit finish** — ``action.type == "finish"`` (agent called the
            *finish* tool).  Any associated tool calls are executed first so that
            their responses appear in the conversation history.
-        3. **No tool call with reminder** — ``action.type == "message"`` (LLM
+        4. **No tool call with reminder** — ``action.type == "message"`` (LLM
            returned text without tool calls) *and* the agent provides a
            ``get_no_tool_call_prompt()``.  The reminder is appended as a
            ``user`` message and the loop **continues**.
-        4. **No tool call without reminder** — same as (3) but agent returns
+        5. **No tool call without reminder** — same as (4) but agent returns
            ``None`` → treated as implicit finish.
-        5. **Max steps** — loop counter exhausted.
-        6. **Error** — any exception during a step.
+        6. **Max steps** — loop counter exhausted.
+        7. **Error** — any exception during a step.
         """
         # Read no-tool-call prompt from agent (may be None).
         no_tool_call_prompt: str | None = None
@@ -96,6 +107,16 @@ class AgentLoop:
             Message(role="user", content=task_prompt),
         ]
         self.ctx.trajectory = Trajectory()
+
+        # ── Training mode: tokenize initial prompt ────────────────────
+        if self.ctx.training is not None:
+            msg_dicts = [m.to_dict() for m in self.ctx.messages]
+            # Pass tool schemas so tokenizers that embed tool descriptions
+            # in the chat template (e.g. Qwen tool-use) produce correct
+            # prompt tokens.  For XML-mode agents the schemas are already
+            # in the system prompt text and the tokenizer ignores `tools`.
+            tool_schemas = self.ctx.get_tool_schemas() or None
+            self.ctx.training.init_prompt(msg_dicts, tools=tool_schemas)
 
         stats = RunStats()
         stats.start()
@@ -136,6 +157,21 @@ class AgentLoop:
                 estimated_next_context = prompt_tokens + completion_tokens
                 stats.record_llm_call(llm_elapsed, prompt_tokens, completion_tokens)
 
+                # ── Training: accumulate model-generated tokens ───────
+                if self.ctx.training is not None:
+                    self._record_model_tokens(action)
+
+                    # Token budget exhausted — break before executing tools.
+                    if action.finish_status == "length":
+                        logger.info(
+                            "Token budget exhausted at step %d, stopping", step,
+                        )
+                        self.ctx.training.finish_status = "length"
+                        finish_reason = "context_length"
+                        self.ctx.trajectory.add_step(step=step, action=action)
+                        stats.end_step()
+                        break
+
                 # Record in trajectory
                 self.ctx.trajectory.add_step(step=step, action=action)
 
@@ -150,7 +186,8 @@ class AgentLoop:
                         tool_elapsed = time.monotonic() - tool_start
                         for tc in action.tool_calls:
                             name = tc.get("name", tc.get("function", {}).get("name", ""))
-                            stats.record_tool_call(name, tool_elapsed / max(len(action.tool_calls), 1))
+                            per_tool = tool_elapsed / max(len(action.tool_calls), 1)
+                            stats.record_tool_call(name, per_tool)
                         self.ctx.trajectory.steps[-1].observations = observations
                     elif action.content:
                         self.ctx.messages.append(
@@ -203,6 +240,8 @@ class AgentLoop:
 
             except Exception as e:
                 logger.error("Agent step %d failed: %s", step, e, exc_info=True)
+                if self.ctx.training is not None:
+                    self.ctx.training.finish_status = "abort"
                 return AgentResult(
                     trajectory=self.ctx.trajectory,
                     messages=list(self.ctx.messages),
@@ -220,7 +259,8 @@ class AgentLoop:
                 self.ctx.task_info.get("pre_agent_commit_id")
                 or self.ctx.task_info.get("base_commit")
             )
-            patch = await self.ctx.session.get_patch(workdir, commit)
+            language = self.ctx.task_info.get("language", "python")
+            patch = await self.ctx.session.get_patch(workdir, commit, language=language)
         except Exception as e:
             logger.warning("Failed to extract patch: %s", e)
 
@@ -246,8 +286,15 @@ class AgentLoop:
             observations = await self._execute_tools(action)
         return action, observations
 
+    # ── Tool execution ────────────────────────────────────────────────
+
     async def _execute_tools(self, action: Action) -> list[str]:
-        """Execute tool calls and collect observations."""
+        """Execute tool calls and collect observations.
+
+        In training mode, each observation is additionally tokenized and
+        recorded in the training state with ``loss_mask=0`` (environment
+        tokens are excluded from the RL loss).
+        """
         observations: list[str] = []
 
         # Determine if we're in XML mode (text-based tool calls)
@@ -273,7 +320,8 @@ class AgentLoop:
             )
             self.ctx.messages.append(assistant_msg)
 
-        for tc in action.tool_calls:
+        num_tools = len(action.tool_calls)
+        for i, tc in enumerate(action.tool_calls):
             tool_name = tc.get("name", tc.get("function", {}).get("name", ""))
             tool_call_id = tc.get("id", "")
             arguments_str = tc.get("arguments", tc.get("function", {}).get("arguments", "{}"))
@@ -283,7 +331,11 @@ class AgentLoop:
                 obs = f"Error: tool '{tool_name}' not found."
             else:
                 try:
-                    params = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                    params = (
+                        json.loads(arguments_str)
+                        if isinstance(arguments_str, str)
+                        else arguments_str
+                    )
                     obs = await tool.execute(params, session=self.ctx.session)
                 except json.JSONDecodeError:
                     obs = f"Error: invalid JSON arguments: {arguments_str}"
@@ -292,7 +344,19 @@ class AgentLoop:
 
             observations.append(obs)
 
-            if xml_mode:
+            # Append to conversation history.
+            # In training mode, always use "tool" role regardless of XML mode,
+            # because the tokenizer needs the correct role for apply_chat_template.
+            if self.ctx.training is not None:
+                if not tool_call_id:
+                    tool_call_id = str(uuid.uuid4())
+                self.ctx.messages.append(Message(
+                    role="tool",
+                    content=obs,
+                    tool_call_id=tool_call_id,
+                    name=tool_name,
+                ))
+            elif xml_mode:
                 # XML mode: tool responses as user messages
                 self.ctx.messages.append(Message(
                     role="user",
@@ -307,7 +371,37 @@ class AgentLoop:
                     name=tool_name,
                 ))
 
+            # ── Training: tokenize observation tokens (loss_mask = 0) ──
+            if self.ctx.training is not None:
+                is_last_obs = (i == num_tools - 1)
+                # Append the assistant generation header only after the
+                # last observation in a non-finish step, so the next
+                # continuation call generates in the correct context.
+                is_final = not (is_last_obs and action.type != "finish")
+                self.ctx.training.append_observation_tokens(
+                    {"role": "tool", "content": obs, "tool_call_id": tool_call_id},
+                    is_final=is_final,
+                )
+
         return observations
+
+    # ── Training helpers ──────────────────────────────────────────────
+
+    def _record_model_tokens(self, action: Action) -> None:
+        """Accumulate model-generated tokens into the training state."""
+        training = self.ctx.training
+        assert training is not None
+
+        if action.token_ids:
+            training.response_text += action.content or ""
+            training.append_model_tokens(
+                action.token_ids,
+                action.logprobs or [],
+                weight_version=action.weight_version or "",
+            )
+
+        if action.finish_status:
+            training.finish_status = action.finish_status
 
 
 def _make_tool_call_obj(tc: dict[str, Any]) -> Any:

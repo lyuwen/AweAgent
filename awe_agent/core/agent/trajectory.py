@@ -18,6 +18,8 @@ class Action:
     # RL data (populated when using SGLang backend)
     token_ids: list[int] | None = None
     logprobs: list[float] | None = None
+    weight_version: str | None = None
+    finish_status: str | None = None  # "stop" | "length"
 
     # Token usage from LLM response (for stats tracking)
     usage: Any = None

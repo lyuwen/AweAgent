@@ -82,8 +82,8 @@ class PatchTestEvaluator(Evaluator):
                 # 1 ── Checkout base commit
                 if instance.base_commit:
                     await session.execute(
-                        f"cd {instance.workdir} && "
                         f"git checkout {instance.base_commit}",
+                        cwd=instance.workdir,
                     )
 
                 # 1.5 ── Pre-patch setup (hook for subclasses)
@@ -111,7 +111,7 @@ class PatchTestEvaluator(Evaluator):
 
                 # 4 ── Task-specific setup
                 for cmd in self.get_setup_commands(instance):
-                    await session.execute(cmd, timeout=300)
+                    await session.execute(cmd, cwd=instance.workdir, timeout=300)
 
                 # 5 ── Run tests (subclass implementation)
                 eval_result = await self.run_tests(instance, session)

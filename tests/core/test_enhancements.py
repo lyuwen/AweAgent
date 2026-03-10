@@ -940,7 +940,6 @@ async def test_pre_agent_setup_prepare():
     # Fifth command: remove_future_commits
     assert "git for-each-ref" in session.commands[4]
     assert "git stash clear" in session.commands[4]
-    assert session.commands[4].startswith("cd /testbed && ")
     # Returns the commit SHA
     assert commit_id == "abc123"
 
@@ -958,7 +957,6 @@ async def test_pre_agent_setup_remove_future_commits():
 
     assert len(session.commands) == 1
     cmd = session.commands[0]
-    assert cmd.startswith("cd /workspace && ")
     assert "git rev-parse --abbrev-ref HEAD" in cmd
     assert "git for-each-ref" in cmd
     assert "git branch -f" in cmd

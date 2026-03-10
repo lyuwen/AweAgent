@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
+import shlex
 import tarfile
 import uuid
 from typing import Any
@@ -50,7 +52,7 @@ class DockerSession(RuntimeSession):
             )
             return result.exit_code, result.output
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Per-command timeout (e.g. bash_timeout=120); session TTL is
         # enforced at the protocol layer via asyncio.timeout().
@@ -61,8 +63,20 @@ class DockerSession(RuntimeSession):
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                raise TimeoutError(
-                    f"Command timed out after {timeout}s: {command[:200]}"
+                # Kill orphan processes inside the container to prevent
+                # resource leaks.  The exec_run thread may still be blocked
+                # but Docker will terminate the exec once we kill its PID.
+                try:
+                    self._container.exec_run(
+                        ["bash", "-c", "kill -9 -1 2>/dev/null || true"],
+                        detach=True,
+                    )
+                except Exception:
+                    pass
+                return ExecutionResult(
+                    stdout="",
+                    stderr=f"Command timed out after {timeout}s: {command[:200]}",
+                    exit_code=124,
                 )
         else:
             exit_code, output = await loop.run_in_executor(None, _run)
@@ -88,13 +102,17 @@ class DockerSession(RuntimeSession):
             buf.seek(0)
             self._container.put_archive(os.path.dirname(remote_path) or "/", buf)
 
-        await asyncio.get_event_loop().run_in_executor(None, _upload)
+        await asyncio.get_running_loop().run_in_executor(None, _upload)
 
     async def download_file(self, remote_path: str) -> bytes:
         import asyncio
 
         def _download() -> bytes:
-            bits, _ = self._container.get_archive(remote_path)
+            try:
+                bits, _ = self._container.get_archive(remote_path)
+            except Exception as exc:
+                # docker SDK raises NotFound (404) when file does not exist
+                raise FileNotFoundError(f"File not found: {remote_path}") from exc
             buf = io.BytesIO()
             for chunk in bits:
                 buf.write(chunk)
@@ -106,11 +124,11 @@ class DockerSession(RuntimeSession):
                     return b""
                 return f.read()
 
-        return await asyncio.get_event_loop().run_in_executor(None, _download)
+        return await asyncio.get_running_loop().run_in_executor(None, _download)
 
     async def list_files(self, path: str, recursive: bool = False) -> list[str]:
-        flag = "-R" if recursive else ""
-        result = await self.execute(f"ls {flag} {path}")
+        flag = "-R " if recursive else ""
+        result = await self.execute(f"ls {flag}{shlex.quote(path)}")
         if result.success:
             return [line for line in result.stdout.strip().split("\n") if line]
         return []
@@ -128,7 +146,7 @@ class DockerSession(RuntimeSession):
             except Exception:
                 logger.warning("Failed to cleanup container %s", self._container.id[:12])
 
-        await asyncio.get_event_loop().run_in_executor(None, _cleanup)
+        await asyncio.get_running_loop().run_in_executor(None, _cleanup)
         logger.info("Container %s removed", self._container.id[:12])
 
 
@@ -159,7 +177,7 @@ class DockerRuntime(Runtime):
             raise ValueError("No image specified for Docker runtime")
 
         # Container names only allow [a-zA-Z0-9_.-]
-        safe_img = img.rsplit("/", 1)[-1].replace(":", "-")
+        safe_img = re.sub(r"[^a-zA-Z0-9_.-]", "-", img.rsplit("/", 1)[-1])
         container_name = f"awe-agent-{safe_img}-{uuid.uuid4().hex[:12]}"
 
         def _create() -> Any:
@@ -188,15 +206,27 @@ class DockerRuntime(Runtime):
                 network=self.config.docker.network,
                 mem_limit=mem_bytes,
                 nano_cpus=cpu_count * 10**9,
-                volumes={v.split(":")[0]: {"bind": v.split(":")[1], "mode": "rw"}
-                         for v in self.config.docker.volumes if ":" in v} or None,
+                volumes=_parse_volumes(self.config.docker.volumes) or None,
             )
             return container
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         container = await loop.run_in_executor(None, _create)
         logger.info("Created container %s (%s) from %s", container_name, container.id[:12], img)
         return DockerSession(container, self.config)
+
+
+def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
+    """Parse volume specs like '/host:/container' or '/host:/container:ro'."""
+    volumes = {}
+    for v in volume_specs:
+        parts = v.split(":")
+        if len(parts) >= 2:
+            host_path = parts[0]
+            container_path = parts[1]
+            mode = parts[2] if len(parts) >= 3 else "rw"
+            volumes[host_path] = {"bind": container_path, "mode": mode}
+    return volumes
 
 
 def _parse_memory(mem_str: str) -> int:

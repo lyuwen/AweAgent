@@ -238,14 +238,24 @@ class SearchSWEAgent(Agent):
         # Prepare tools based on format (None for text-based formats)
         api_tools = self._format.prepare_tools(context.get_tool_schemas())
 
+        # RL training mode: pass input_ids for token-level continuation
+        llm_overrides: dict[str, Any] = {}
+        if context.training is not None:
+            llm_overrides["input_ids"] = context.training.get_input_ids()
+
         # LLM call with validation retry
         response = None
         for attempt in range(1, self._max_empty_retries + 1):
             response = await context.llm.chat(
                 messages=messages,
                 tools=api_tools,
+                **llm_overrides,
             )
             if self._is_valid_response(response):
+                break
+            # In training mode, "length" means the token budget is
+            # exhausted — a valid terminal state, not a transient error.
+            if context.training is not None and response.finish_status == "length":
                 break
             logger.warning(
                 "Invalid LLM response (attempt %d/%d): empty=%s, truncated=%s",
@@ -270,6 +280,8 @@ class SearchSWEAgent(Agent):
                 tool_calls=tool_call_dicts,
                 token_ids=response.completion_token_ids,
                 logprobs=response.logprobs,
+                weight_version=response.weight_version,
+                finish_status=response.finish_status,
                 usage=response.usage,
             )
 
@@ -280,5 +292,7 @@ class SearchSWEAgent(Agent):
             thinking=response.thinking,
             token_ids=response.completion_token_ids,
             logprobs=response.logprobs,
+            weight_version=response.weight_version,
+            finish_status=response.finish_status,
             usage=response.usage,
         )

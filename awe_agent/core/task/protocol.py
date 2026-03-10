@@ -39,7 +39,7 @@ class Task(ABC):
         """Get setup commands to run before the agent starts."""
         commands = list(instance.setup_commands)
         if instance.base_commit:
-            commands.insert(0, f"cd {instance.workdir} && git checkout {instance.base_commit}")
+            commands.insert(0, f"git checkout {instance.base_commit}")
         return commands
 
     def get_task_info(self, instance: Instance) -> dict[str, Any]:

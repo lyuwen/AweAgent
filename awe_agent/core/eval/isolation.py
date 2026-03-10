@@ -50,7 +50,8 @@ class IsolatedEvaluator(Evaluator):
                 # Checkout base commit
                 if instance.base_commit:
                     await session.execute(
-                        f"cd {instance.workdir} && git checkout {instance.base_commit}"
+                        f"git checkout {instance.base_commit}",
+                        cwd=instance.workdir,
                     )
 
                 # Apply patch
@@ -65,7 +66,7 @@ class IsolatedEvaluator(Evaluator):
 
                 # Setup commands
                 for cmd in self._setup_commands:
-                    await session.execute(cmd, timeout=300)
+                    await session.execute(cmd, cwd=instance.workdir, timeout=300)
 
                 # Run evaluation
                 eval_result = await session.execute(

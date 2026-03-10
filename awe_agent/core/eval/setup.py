@@ -64,7 +64,7 @@ class PreAgentSetup:
     async def run_setup_commands(self, commands: list[str]) -> None:
         """Execute setup commands (from ``instance.setup_commands``)."""
         for cmd in commands:
-            result = await self.session.execute(cmd, self.workdir, timeout=300)
+            result = await self.session.execute(cmd, cwd=self.workdir, timeout=300)
             if not result.success:
                 logger.warning(
                     "Setup command failed (exit %d): %s -> %s",
@@ -76,10 +76,10 @@ class PreAgentSetup:
     async def commit_and_get_id(self) -> str | None:
         """Commit current state, return HEAD SHA."""
         await self.session.execute(
-            f"cd {self.workdir} && {_GIT_COMMIT_PRE_AGENT}", timeout=120,
+            _GIT_COMMIT_PRE_AGENT, cwd=self.workdir, timeout=120,
         )
         result = await self.session.execute(
-            f"cd {self.workdir} && git rev-parse HEAD", timeout=120,
+            "git rev-parse HEAD", cwd=self.workdir, timeout=120,
         )
         if result.success and result.stdout.strip():
             return result.stdout.strip()
@@ -88,7 +88,7 @@ class PreAgentSetup:
     async def remove_future_commits(self) -> None:
         """Reset all git refs to HEAD, clear stash.  Prevents data leakage."""
         await self.session.execute(
-            f"cd {self.workdir} && {_REMOVE_FUTURE_COMMITS}",
+            _REMOVE_FUTURE_COMMITS, cwd=self.workdir,
         )
 
     async def prepare(self, instance: Instance) -> str | None:

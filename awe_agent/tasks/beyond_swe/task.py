@@ -213,14 +213,13 @@ class BeyondSWETask(Task):
 
         if instance.base_commit:
             commands.append(
-                f"cd {instance.workdir} && git checkout {instance.base_commit}"
+                f"git checkout {instance.base_commit}"
             )
 
         # For crossrepo and domainfix, verify parent commit checkout
         parent_commit = instance.metadata.get("parent_commit", "")
         if parent_commit and task_type in ("crossrepo", "domainfix"):
             commands.append(
-                f"cd {instance.workdir} && "
                 f"git log --oneline -1 | grep -q {parent_commit[:8]} || true"
             )
 

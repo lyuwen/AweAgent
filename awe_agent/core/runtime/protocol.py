@@ -13,6 +13,61 @@ from awe_agent.core.runtime.types import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
+# ─── .gitignore rules (ported from swalm/core/utils/swe_bench.py) ────────────
+# Shared across all runtime backends so that get_patch() excludes build
+# artefacts regardless of whether the session runs on Docker or Portal.
+
+_DEFAULT_GITIGNORE = [
+    "*.jpg", "*.png", "*.jpeg", "*.o", "*.out", "*.obj", "*.so", "build", "Build",
+]
+
+_LANGUAGE_GITIGNORES: dict[str, list[str]] = {
+    "c": ["bin/", "lib/", "*.dylib"],
+    "cpp": ["bin/", "lib/", "*.dylib"],
+    "java": ["target/", "out/", "*.class", "*.jar", ".gradle/"],
+    "js": [
+        "node_modules/", "dist/", ".next/", "coverage/", ".env",
+        "npm-debug.log*", "yarn-debug.log*", "yarn-error.log*",
+    ],
+    "ts": [
+        "node_modules/", "build/", "dist/", ".next/", "coverage/", ".env",
+        "npm-debug.log*", "yarn-debug.log*", "yarn-error.log*",
+        "*.js", "*.js.map", "*.d.ts", ".tsbuildinfo",
+    ],
+    "go": ["pkg/", "vendor/", "bin/", "*.test"],
+    "rust": ["target/", "Cargo.lock", "*.rs.bk"],
+    "python": [],
+    "csharp": [
+        "bin/", "obj/", "*.suo", "*.user", "*.userosscache",
+        "*.sln.docstates", "*.vs/", "*.cache/", "*.pdb", "*.dll", "*.exe",
+    ],
+    "kotlin": ["build/", "out/", "*.class", "*.jar", ".gradle/", "buildSrc/build/", "*.kt.bak"],
+    "php": ["vendor/", "composer.lock", "composer.phar", "*.log", "*.cache", "*.tmp", "*.swp", ".env", "phpunit.xml"],
+    "ruby": ["*.gem", "Gemfile.lock", "vendor/", "log/", "tmp/", "*.bundle", "*.so", "*.o", "*.a", "mkmf.log"],
+    "scala": ["target/", "project/target/", "project/project/", "*.class", "*.jar", ".sbt/", ".scala/", "*.log"],
+    "swift": [".build/", "Packages/", "*.xcworkspace/", "*.xcuserstate", "*.xcprofdata", "DerivedData/", "*.swp", "*.swo", "*.log", "Pods/", "Podfile.lock"],
+}
+
+_LANGUAGE_ALIAS: dict[str, list[str]] = {
+    "java": ["java"], "cpp": ["cpp", "c++"], "c": ["c"],
+    "js": ["js", "javascript"], "ts": ["ts", "typescript"],
+    "go": ["go", "golang"], "rust": ["rust"], "python": ["python"],
+    "csharp": ["csharp", "c#", "cs"], "kotlin": ["kotlin"],
+    "php": ["php"], "ruby": ["ruby"], "scala": ["scala"], "swift": ["swift"],
+}
+
+_GITIGNORE_START = "# === AWEAGENT AUTO-GENERATED START ==="
+_GITIGNORE_END = "# === AWEAGENT AUTO-GENERATED END ==="
+
+
+def _normalize_language(language: str) -> str:
+    """Normalize language aliases (e.g., 'javascript' → 'js')."""
+    language = language.lower().strip()
+    for canonical, aliases in _LANGUAGE_ALIAS.items():
+        if language in aliases:
+            return canonical
+    return language
+
 
 class RuntimeSession(ABC):
     """Abstract session representing a single running environment.
@@ -47,12 +102,60 @@ class RuntimeSession(ABC):
         """List files in a directory."""
         ...
 
-    async def get_patch(self, cwd: str, base_commit: str | None = None) -> str:
+    # ─── .gitignore management ────────────────────────────────────────
+
+    async def _update_gitignore(self, cwd: str, language: str) -> None:
+        """Inject language-specific .gitignore rules before git operations.
+
+        Manages a clearly delimited block so the rules are idempotent:
+        subsequent calls replace the block instead of duplicating it.
+        Uses abstract ``download_file`` / ``upload_file`` so every backend
+        inherits this behaviour automatically.
+        """
+        lang = _normalize_language(language)
+        rules = _DEFAULT_GITIGNORE + _LANGUAGE_GITIGNORES.get(lang, [])
+        block = "\n".join([_GITIGNORE_START] + rules + [_GITIGNORE_END])
+
+        gitignore_path = f"{cwd}/.gitignore"
+
+        # Read existing content (file may not exist)
+        content = ""
+        try:
+            raw = await self.download_file(gitignore_path)
+            content = raw.decode("utf-8", errors="replace")
+        except (FileNotFoundError, Exception):
+            pass
+
+        # Idempotent update: replace existing block or append
+        if _GITIGNORE_START in content and _GITIGNORE_END in content:
+            start_idx = content.find(_GITIGNORE_START)
+            end_idx = content.find(_GITIGNORE_END) + len(_GITIGNORE_END)
+            new_content = content[:start_idx] + block + content[end_idx:]
+        else:
+            if content and not content.endswith("\n"):
+                content += "\n"
+            new_content = content + ("\n" if content else "") + block
+
+        if new_content != content:
+            await self.upload_file(gitignore_path, new_content.encode())
+
+    # ─── Git helpers ──────────────────────────────────────────────────
+
+    async def get_patch(
+        self,
+        cwd: str,
+        base_commit: str | None = None,
+        language: str = "python",
+    ) -> str:
         """Get git diff as patch, including untracked new files.
 
-        Uses ``git add -A && git diff --cached`` to capture both modified
+        Updates ``.gitignore`` with language-specific rules before staging
+        so that build artefacts are excluded from the patch.  Uses
+        ``git add -A && git diff --cached`` to capture both modified
         tracked files and newly created files.
         """
+        await self._update_gitignore(cwd, language)
+
         if base_commit:
             result = await self.execute(
                 f"git add -A && git diff --cached {base_commit}", cwd=cwd,
