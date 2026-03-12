@@ -45,37 +45,7 @@ export LINK_SUMMARY_CONFIG_PATH="/path/to/configs/llm/link_summary/azure.yaml"
 
 ## Quick Start
 
-### 1. List instances (no Docker needed)
-
-```bash
-python recipes/beyond_swe/run.py \
-    --data-file /path/to/beyondswe.jsonl \
-    --mode dry-run
-```
-
-### 2. Inspect prompt (no Docker needed)
-
-```bash
-python recipes/beyond_swe/run.py \
-    --data-file /path/to/beyondswe.jsonl \
-    --instance-id pylons_plaster_pastedeploy_pr14 \
-    --mode prompt
-```
-
-### 3. Debug a single instance
-
-```bash
-python recipes/beyond_swe/run.py \
-    --data-file /path/to/beyondswe.jsonl \
-    --instance-id pylons_plaster_pastedeploy_pr14 \
-    --mode debug \
-    --model gpt-4o \
-    --max-steps 20 \
-    --enable-search \
-    --verbose
-```
-
-### 4. Batch run
+### Batch run
 
 ```bash
 # Search mode (default config)
@@ -96,7 +66,7 @@ python recipes/beyond_swe/run.py \
     --no-search
 ```
 
-### 5. Shell script (batch only)
+### Shell script (batch only)
 
 ```bash
 bash recipes/beyond_swe/run_beyond_swe_search.sh \
@@ -118,7 +88,7 @@ Key settings in `beyondswe_searchswe.yaml`:
 ```yaml
 agent:
   type: search_swe
-  max_steps: 200          # max steps per instance
+  max_steps: 200          # max agent steps per instance
   enable_search: true     # toggle search tools
   bash_timeout: 1200      # bash command timeout (seconds)
 
@@ -126,6 +96,13 @@ execution:
   max_concurrent: 50      # parallel instances
   max_retries: 3          # retry on failure
 ```
+
+### Model Configuration
+
+| Model | Usage | Max Completion Tokens |
+|-------|-------|----------------------:|
+| LLM (agent backbone) | Agent reasoning & tool calls | 16384 |
+| Summary model (DeepSeek v3.2) | Search link summarization | 32768 |
 
 ## Modes
 
@@ -163,18 +140,10 @@ results/beyondswe_searchswe/
   <run_id>/
     results.jsonl           # one line per instance result
     config.json             # config snapshot
-    trajectories/           # per-instance agent trajectories
-      inst_001.json
-      inst_002.json
+    trajectories.jsonl      # per-instance agent trajectories
 ```
 
 ## Troubleshooting
-
-**Cannot pull Docker image** — if network is restricted, download via crane and load locally:
-```bash
-HTTPS_PROXY=http://127.0.0.1:11110 crane pull <image:tag> /tmp/img.tar
-docker load -i /tmp/img.tar
-```
 
 **LLM timeout** — add `timeout: 600` to `configs/llm/azure.yaml` (default is 120s, may be too short for large contexts).
 

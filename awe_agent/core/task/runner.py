@@ -278,9 +278,13 @@ class TaskRunner:
         """Run agent + evaluation on a single instance."""
         start_time = time.monotonic()
 
-        # Create runtime
+        # Create runtime with per-instance workdir override
         runtime_cls = runtime_registry.get(self.runtime_config.backend)
-        runtime: Runtime = runtime_cls(self.runtime_config)
+        instance_workdir = instance.workdir or self.runtime_config.workdir
+        runtime_config = self.runtime_config.model_copy(
+            update={"workdir": instance_workdir},
+        )
+        runtime: Runtime = runtime_cls(runtime_config)
         image = self.task.get_image(instance)
 
         async with runtime.session(image) as session:

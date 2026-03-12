@@ -57,12 +57,16 @@ class ArkBackend:
         # Extended thinking support (special handling: convert to Ark format)
         thinking_config = params.pop("thinking", None)
         if thinking_config or self.config.thinking:
+            thinking_param: dict[str, Any] = {"type": "enabled"}
+            # Only include budget_tokens when explicitly configured
             budget = (
                 thinking_config.get("budget_tokens", self.config.thinking_budget)
                 if isinstance(thinking_config, dict)
                 else self.config.thinking_budget
-            ) or 10000
-            params["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            )
+            if budget is not None:
+                thinking_param["budget_tokens"] = budget
+            params["thinking"] = thinking_param
 
         response = await self._client.chat.completions.create(**params)
         return self._parse_response(response)

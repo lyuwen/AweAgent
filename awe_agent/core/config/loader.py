@@ -47,7 +47,7 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
         if not isinstance(data, dict):
             logger.warning("YAML file %s did not parse to a dict, got %s", p, type(data).__name__)
             return {}
-        return data
+        return _resolve_env_vars(data)
     except Exception as exc:
         logger.warning("Failed to load YAML from %s: %s", p, exc)
         return {}

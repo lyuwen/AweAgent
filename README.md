@@ -19,6 +19,7 @@ AweAgent currently ships with [BeyondSWE](https://github.com/AweAI-Team/BeyondSW
 
 ## :newspaper: News
 
+- `[2026-03-11]` Sync codebase with internal version for BeyondSWE + SearchSWE
 - `[2026-03-01]` 🎉 Initial release — SearchSWE agent scaffold (OpenHands-compatible CodeAct XML) with [BeyondSWE](https://github.com/AweAI-Team/BeyondSWE) & [ScaleSWE](https://github.com/AweAI-Team/ScaleSWE) benchmark support
 
 ## :building_construction: Architecture
