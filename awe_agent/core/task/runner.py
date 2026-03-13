@@ -245,6 +245,8 @@ class TaskRunner:
                         with open(output_file, "a") as f:
                             f.write(json.dumps({
                                 "instance_id": result.instance_id,
+                                "dataset_id": instance.dataset_id,
+                                "task": instance.metadata.get("task_type", ""),
                                 "success": result.success,
                                 "score": result.eval_result.score if result.eval_result else 0.0,
                                 "error": result.error,
