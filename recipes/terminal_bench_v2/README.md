@@ -34,49 +34,37 @@ export HTTPS_PROXY="..."
 
 ## Quick Start
 
-### List instances (dry-run)
+### Via recipe script
 
 ```bash
 python recipes/terminal_bench_v2/run.py \
     --task-data-dir /path/to/terminal-bench-2 \
-    --data-file /path/to/instance_ids.json \
-    --mode dry-run
-```
+    --data-file /path/to/instance_ids.json
 
-### Inspect prompt (no Docker)
-
-```bash
+# With overrides
 python recipes/terminal_bench_v2/run.py \
     --task-data-dir /path/to/terminal-bench-2 \
     --data-file /path/to/instance_ids.json \
-    --instance-id configure-git-webserver \
-    --mode prompt
-```
+    --model glm-5 \
+    --max-steps 50 \
+    --max-concurrent 10
 
-### Debug single instance
-
-```bash
+# Run specific instances only
 python recipes/terminal_bench_v2/run.py \
     --task-data-dir /path/to/terminal-bench-2 \
     --data-file /path/to/instance_ids.json \
-    --instance-id configure-git-webserver \
-    --mode debug
-```
-
-### Batch run
-
-```bash
-python recipes/terminal_bench_v2/run.py \
-    --task-data-dir /path/to/terminal-bench-2 \
-    --data-file /path/to/instance_ids.json \
-    --mode batch
-
-# Specific instances only
-python recipes/terminal_bench_v2/run.py \
-    --task-data-dir /path/to/terminal-bench-2 \
-    --data-file /path/to/instance_ids.json \
-    --mode batch \
     --instance-ids task_001 task_002
+```
+
+### Via unified CLI
+
+Terminal Bench 2.0 is fully integrated into the standard `awe-agent run` CLI — no special flags needed:
+
+```bash
+awe-agent run \
+    -c configs/tasks/terminal_bench_v2.yaml \
+    --task-data-dir /path/to/terminal-bench-2 \
+    --data-file /path/to/instance_ids.json
 ```
 
 ### Shell script
@@ -85,42 +73,30 @@ python recipes/terminal_bench_v2/run.py \
 bash recipes/terminal_bench_v2/run_terminal_bench_v2.sh \
     --task-data-dir /path/to/terminal-bench-2 \
     --data-file /path/to/instance_ids.json \
-    --model glm-5 \
-    --mode batch
+    --model glm-5
 ```
 
 ## Reproducibility Results
 
-Results on Terminal Bench 2.0 with AweAgent release aligned with Harbor Leaderboard evaluation settings::
+Results on Terminal Bench 2.0 with AweAgent release aligned with Harbor Leaderboard evaluation settings:
 
 | Model          | Harbor Leaderboard | AweAgent Release |
 | :------------- | :----------------- | :--------------- |
-| GLM 4.7        | 33.4% ± 2.8        | 33.78%           |
-| MiniMax M2.1   | 29.2% ± 2.9        | 30.33%           |
-| GLM 5          | 52.4% ± 2.6        | 49.43%           |
+| GLM 4.7        | 33.4% +/- 2.8      | 33.78%           |
+| MiniMax M2.1   | 29.2% +/- 2.9      | 30.33%           |
+| GLM 5          | 52.4% +/- 2.6      | 49.43%           |
 
-## Modes
-
-| Mode     | Description                          | Docker |
-| :------- | :----------------------------------- | :----: |
-| `dry-run` | List all instances                   | No     |
-| `prompt`  | Print prompt and task_info           | No     |
-| `debug`   | Single-instance run with step trace  | Yes    |
-| `batch`   | Concurrent batch run, JSONL output   | Yes    |
-
-## CLI Arguments
+## CLI Arguments (recipe script)
 
 ```
---task-data-dir DIR     Root directory of task folders (or TASK_DATA_DIR)
---data-file PATH        JSON file with instance ID array (or DATA_FILE)
+--task-data-dir DIR     Root directory of task folders (or TASK_DATA_DIR env)
+--data-file PATH        JSON file with instance ID array (or DATA_FILE env)
 --config / -c PATH      Config file (default: configs/tasks/terminal_bench_v2.yaml)
---mode MODE             prompt | debug | batch | dry-run
---instance-id ID        Single instance ID (prompt/debug)
---instance-ids ID ...   Instance IDs for batch (optional filter)
+--instance-ids ID ...   Instance IDs to run (optional filter)
 --model MODEL           Override LLM model
 --max-steps N           Override max agent steps
---max-concurrent N      Override concurrency (batch)
---output DIR            Output directory (batch)
+--max-concurrent N      Override concurrency
+--output DIR            Output directory
 --skip-eval             Skip evaluation
 --no-trajectories       Don't save trajectories
 --verbose               DEBUG logging
@@ -132,7 +108,7 @@ Task config supports `override_agent_timeout` to override per-task timeouts (e.g
 
 ## Output
 
-Batch results are saved to the `--output` directory (default `results/terminal_bench_v2/`):
+Results are saved to the `--output` directory (default `results/terminal_bench_v2/`):
 
 ```
 results/terminal_bench_v2/

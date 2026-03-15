@@ -1,7 +1,7 @@
 """TmuxSessionAdapter — tmux operations via AweAgent RuntimeSession.
 
 Uses session.execute() to run tmux commands inside the container.
-Aligned with Harbor's TmuxSessionTool interface (send_keys, get_incremental_output).
+Provides send_keys and get_incremental_output for terminal interaction.
 """
 
 from __future__ import annotations

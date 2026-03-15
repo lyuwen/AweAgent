@@ -26,7 +26,7 @@ class TerminusJSONParser:
     """Parser for Terminus JSON plain response format.
 
     Expects JSON with analysis, plan, commands, optional task_complete.
-    Aligned with Harbor terminus_json_plain_parser.
+    Parses the Terminal Bench JSON plain response format.
     """
 
     def __init__(self) -> None:

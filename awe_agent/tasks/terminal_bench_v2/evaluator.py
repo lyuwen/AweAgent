@@ -1,4 +1,4 @@
-"""Terminal Bench V2 Evaluator — Harbor-style verification.
+"""Terminal Bench V2 Evaluator — same-session verification.
 
 Runs bash /tests/test.sh in the container, reads reward.txt or reward.json.
 The evaluator runs in the SAME container the agent used.
@@ -30,7 +30,7 @@ class TerminalBenchV2Evaluator(Evaluator):
     requires_same_session: When True, the runner must evaluate in the same
     container as the agent (no patch to apply — agent modifies state directly).
 
-    Flow (aligned with Harbor):
+    Flow:
     1. mkdir -p /logs/agent /logs/verifier
     2. Upload test files to /tests/
     3. Run bash /tests/test.sh (with cwd=workdir, env)
@@ -38,7 +38,9 @@ class TerminalBenchV2Evaluator(Evaluator):
     5. accepted = reward > 0
     """
 
-    requires_same_session = True
+    @property
+    def requires_same_session(self) -> bool:  # noqa: D102
+        return True
 
     def __init__(self, timeout: int | None = None, **kwargs: object) -> None:
         super().__init__()

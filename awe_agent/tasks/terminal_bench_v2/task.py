@@ -1,4 +1,4 @@
-"""Terminal Bench V2 Task — Harbor-format task loading for Terminal-Bench 2.0.
+"""Terminal Bench V2 Task — task loading for Terminal-Bench 2.0.
 
 Data source: a directory of task folders (each folder = one instance).
 Each task folder contains: instruction.md, task.toml, environment/, tests/
@@ -144,7 +144,7 @@ class AgentConfig(BaseModel):
 
 
 class EnvironmentConfig(BaseModel):
-    """Harbor-aligned. Supports cpus, memory, storage for Docker resource limits."""
+    """Supports cpus, memory, storage for Docker resource limits."""
 
     build_timeout_sec: float = 600.0
     docker_image: str | None = None
@@ -241,7 +241,7 @@ class TaskInfo:
 
 
 def _get_dockerfile_workdir(task_dir: Path) -> str | None:
-    """Parse last WORKDIR from Dockerfile. Harbor runs verifier with cwd=WORKDIR."""
+    """Parse last WORKDIR from Dockerfile for verifier cwd."""
     for candidate in (task_dir / "environment" / "Dockerfile", task_dir / "Dockerfile"):
         if not candidate.exists():
             continue
@@ -293,7 +293,7 @@ def list_available_tasks(task_data_dir: str | Path) -> list[str]:
 
 
 class TerminalBenchV2Task(Task):
-    """Task implementation for Terminal-Bench 2.0 (Harbor format).
+    """Task implementation for Terminal-Bench 2.0.
 
     Loads instances from a directory of task folders. Each folder contains:
     - instruction.md, task.toml, environment/, tests/
@@ -350,9 +350,12 @@ class TerminalBenchV2Task(Task):
         return instances
 
     def get_prompt(self, instance: Instance) -> str:
-        """Return the full prompt. Matches Harbor: single message from json_plain.txt.
+        """Return the initial prompt with an empty terminal_state placeholder.
 
-        terminal_state="" for initial call; agent provides real state when building.
+        The ``Terminus2Agent`` replaces the user message on its first
+        ``step()`` call with a version containing the real terminal state
+        (read from ``task_info["prompt_template"]``).  This initial value
+        serves only as a structural placeholder for ``AgentLoop.run()``.
         """
         from awe_agent.tasks.terminal_bench_v2.prompt import format_prompt
 
@@ -368,7 +371,7 @@ class TerminalBenchV2Task(Task):
     def get_setup_commands(self, instance: Instance) -> list[str]:
         """Terminal Bench: inject PyPI, proxy, install tmux and asciinema.
 
-        Aligned with Harbor's run_terminal_bench_v2_task.
+        Installs tmux, asciinema, and configures PyPI/proxy env vars.
 
         Environment propagation strategy:
         1. Write all env exports to /root/.awe_agent_env (guard-free).
@@ -423,6 +426,8 @@ class TerminalBenchV2Task(Task):
         return commands
 
     def get_task_info(self, instance: Instance) -> dict[str, Any]:
+        from awe_agent.tasks.terminal_bench_v2.prompt import get_template
+
         inst = TerminalBenchInstance.from_instance(instance)
         return {
             "instance_id": inst.id,
@@ -435,15 +440,22 @@ class TerminalBenchV2Task(Task):
             "cpus": inst.cpus,
             "memory_mb": inst.memory_mb,
             "storage_mb": inst.storage_mb,
+            # The raw prompt template; the agent fills in {terminal_state}
+            # at runtime.  This avoids scaffold -> tasks layer coupling.
+            "prompt_template": get_template(),
         }
 
-    def get_resource_limits(self, instance: Instance) -> dict[str, str]:
-        """Per-instance limits from task.toml (aligned with Harbor)."""
+    def get_resource_limits(self, instance: Instance) -> dict[str, str] | None:
+        """Per-instance limits from task.toml."""
         inst = TerminalBenchInstance.from_instance(instance)
         return {
             "cpu": str(inst.cpus),
             "memory": f"{inst.memory_mb}Mi",
         }
+
+    def get_docker_environment(self, instance: Instance) -> dict[str, str] | None:
+        """Set BASH_ENV so every bash -c auto-sources the env file."""
+        return {"BASH_ENV": "/root/.awe_agent_env"}
 
     def requires_git_snapshot(self) -> bool:
         """Terminal Bench has no git repo in workdir."""

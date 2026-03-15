@@ -56,14 +56,6 @@ def main() -> None:
     run_parser.add_argument(
         "--dry-run", action="store_true", help="Load config and list instances without running"
     )
-    run_parser.add_argument(
-        "--task-data-dir", default=None,
-        help="[Terminal Bench 2.0] Root directory of task folders (or TASK_DATA_DIR)",
-    )
-    run_parser.add_argument(
-        "--data-file", default=None,
-        help="[Terminal Bench 2.0] JSON file with instance ID array (or DATA_FILE)",
-    )
 
     # ── info command ─────────────────────────────────────────────────
     info_parser = subparsers.add_parser("info", help="Show available backends and plugins")
@@ -122,7 +114,9 @@ def _cmd_info() -> None:
 
 async def _cmd_run(args: argparse.Namespace) -> None:
     """Run agent on task instances."""
+    from awe_agent.core.condenser import build_condenser
     from awe_agent.core.config.loader import load_config
+    from awe_agent.core.task.runner import TaskRunner
 
     logger = logging.getLogger("awe_agent.cli")
 
@@ -134,10 +128,6 @@ async def _cmd_run(args: argparse.Namespace) -> None:
         overrides.setdefault("agent", {})["max_steps"] = args.max_steps
     if args.output is not None:
         overrides.setdefault("execution", {})["output_path"] = args.output
-    if args.task_data_dir is not None:
-        overrides.setdefault("task", {})["task_data_dir"] = args.task_data_dir
-    if args.data_file is not None:
-        overrides.setdefault("task", {})["data_file"] = args.data_file
 
     # Load config
     config = load_config(args.config, overrides=overrides)
@@ -158,26 +148,9 @@ async def _cmd_run(args: argparse.Namespace) -> None:
 
     logger.info("Running %d instances", len(instances))
 
-    # Terminal Bench 2.0 uses TB2BatchRunner (different agent loop + eval flow)
-    if config.task.type == "terminal_bench_v2":
-        from awe_agent.core.task.tb2_batch_runner import TB2BatchRunner
-
-        runner = TB2BatchRunner(
-            config,
-            task,
-            skip_eval=not config.eval.enabled,
-            save_trajectories=config.execution.save_trajectories and not args.no_trajectories,
-            max_retries=config.execution.max_retries,
-        )
-        await runner.run_all(args.instance_ids)
-        return
-
-    # BeyondSWE / ScaleSWE use TaskRunner
-    from awe_agent.core.task.runner import TaskRunner
-
+    # Unified runner for all task types.
     agent_factory = _build_agent_factory(config)
     evaluator = _build_evaluator(config, task)
-    from awe_agent.core.condenser import build_condenser
     condenser = build_condenser(config.agent.condenser)
     config_snapshot = json.loads(config.model_dump_json())
 
@@ -209,7 +182,6 @@ async def _cmd_run(args: argparse.Namespace) -> None:
 def _build_task(config: Any):
     """Build a Task instance from config."""
     task_type = config.task.type
-    search_mode = config.agent.enable_search
 
     if task_type == "beyond_swe":
         from awe_agent.tasks.beyond_swe.task import BeyondSWETask
@@ -217,7 +189,7 @@ def _build_task(config: Any):
         return BeyondSWETask(
             dataset_id=config.task.dataset_id,
             data_file=config.task.data_file,
-            search_mode=search_mode,
+            search_mode=config.agent.enable_search,
             test_suite_dir=config.task.test_suite_dir,
         )
     elif task_type == "scale_swe":
@@ -235,12 +207,12 @@ def _build_task(config: Any):
         if not task_data_dir:
             raise ValueError(
                 "task_data_dir is required for terminal_bench_v2. "
-                "Set --task-data-dir or TASK_DATA_DIR."
+                "Set task.task_data_dir in config YAML."
             )
         if not data_file:
             raise ValueError(
                 "data_file is required for terminal_bench_v2. "
-                "Set --data-file or DATA_FILE."
+                "Set task.data_file in config YAML."
             )
         return TerminalBenchV2Task(
             task_data_dir=task_data_dir,
@@ -282,10 +254,9 @@ def _build_evaluator(config: Any, task: Any):
         return None
 
     # Prefer task-specific evaluator
-    if hasattr(task, "default_evaluator"):
-        task_eval = task.default_evaluator(timeout=config.eval.timeout)
-        if task_eval is not None:
-            return task_eval
+    task_eval = task.default_evaluator(timeout=config.eval.timeout)
+    if task_eval is not None:
+        return task_eval
 
     # Fallback to generic isolated evaluator
     if config.eval.isolated:

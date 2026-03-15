@@ -1,4 +1,4 @@
-"""Terminal Bench 2.0 prompt — exactly matches Harbor/swalm.
+"""Terminal Bench 2.0 prompt template.
 
 Single message: template.format(instruction=..., terminal_state=...)
 No system/user split. Only json_plain.txt.
@@ -11,7 +11,7 @@ from pathlib import Path
 _TEMPLATE_CACHE: str | None = None
 
 
-def _get_template() -> str:
+def get_template() -> str:
     global _TEMPLATE_CACHE
     if _TEMPLATE_CACHE is None:
         _TEMPLATE_CACHE = (
@@ -21,8 +21,8 @@ def _get_template() -> str:
 
 
 def format_prompt(instruction: str, terminal_state: str = "") -> str:
-    """Format the full prompt. Exactly matches swalm's template.format()."""
-    return _get_template().format(
+    """Format the full prompt with instruction and terminal state."""
+    return get_template().format(
         instruction=instruction,
         terminal_state=terminal_state,
     )
