@@ -82,9 +82,12 @@ Results on Terminal Bench 2.0 with AweAgent release aligned with Harbor Leaderbo
 
 | Model          | Harbor Leaderboard | AweAgent Release |
 | :------------- | :----------------- | :--------------- |
-| GLM 4.7        | 33.4% +/- 2.8      | 33.78%           |
+| GLM 4.7        | 33.4% +/- 2.8      | 31.46%           |
 | MiniMax M2.1   | 29.2% +/- 2.9      | 30.33%           |
 | GLM 5          | 52.4% +/- 2.6      | 49.43%           |
+| Kimi K2        | 27.8% +/- 2.5      | 24.71%           |
+| Kimi K2 Thinking | 35.7% +/- 2.8    | 37.09%           |
+
 
 ## CLI Arguments (recipe script)
 
