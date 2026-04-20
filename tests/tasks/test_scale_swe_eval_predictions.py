@@ -37,7 +37,34 @@ EXPECTED_REPORT_KEYS = {
 }
 
 
-def _load_module():
+def _install_fake_benchmarks_module():
+    if "benchmarks.scaleswe.run_infer" in sys.modules:
+        return
+
+    fake_benchmarks = types.ModuleType("benchmarks")
+    fake_benchmarks.__path__ = []
+    fake_scaleswe = types.ModuleType("benchmarks.scaleswe")
+    fake_scaleswe.__path__ = []
+    fake_run_infer = types.ModuleType("benchmarks.scaleswe.run_infer")
+
+    def resolve_image_url(image_url: str, prefix: str | None = None) -> str:
+        if prefix is None:
+            return image_url
+        repo, _, tag = image_url.partition(":")
+        image_name = repo.split("/")[-1]
+        return f"{prefix}/{image_name}:{tag}" if tag else f"{prefix}/{image_name}"
+
+    setattr(fake_run_infer, "resolve_image_url", resolve_image_url)
+    setattr(fake_benchmarks, "scaleswe", fake_scaleswe)
+    setattr(fake_scaleswe, "run_infer", fake_run_infer)
+    sys.modules["benchmarks"] = fake_benchmarks
+    sys.modules["benchmarks.scaleswe"] = fake_scaleswe
+    sys.modules["benchmarks.scaleswe.run_infer"] = fake_run_infer
+
+
+def _load_module(*, install_fake_benchmarks: bool = True):
+    if install_fake_benchmarks:
+        _install_fake_benchmarks_module()
     spec = importlib.util.spec_from_file_location("scale_swe_eval_predictions", CLI_PATH)
     assert spec is not None
     assert spec.loader is not None
@@ -374,8 +401,21 @@ def test_run_loads_dataset_via_scale_swe_task_and_writes_report(
     assert json.loads(output_path.read_text())["incomplete_ids"] == ["asset-case"]
 
 
-def test_build_evaluation_context_resolves_image_urls_with_prefix():
-    module = _load_module()
+def test_load_resolve_image_url_from_env_var_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    run_infer_path = tmp_path / "run_infer.py"
+    run_infer_path.write_text(
+        "def resolve_image_url(image_url, prefix=None):\n"
+        "    return f'env::{prefix}::{image_url}'\n"
+    )
+    monkeypatch.setenv("AWE_SCALE_SWE_RUN_INFER_PATH", str(run_infer_path))
+    monkeypatch.delitem(sys.modules, "benchmarks.scaleswe.run_infer", raising=False)
+    monkeypatch.delitem(sys.modules, "benchmarks.scaleswe", raising=False)
+    monkeypatch.delitem(sys.modules, "benchmarks", raising=False)
+
+    module = _load_module(install_fake_benchmarks=False)
 
     context = module.build_evaluation_context(
         instance={
@@ -391,6 +431,6 @@ def test_build_evaluation_context_resolves_image_urls_with_prefix():
         docker_image_prefix="harbor.zhejianglab.com/zj021",
     )
 
-    assert context["image"] == "harbor.zhejianglab.com/zj021/scaleswe:latest"
+    assert context["image"] == "env::harbor.zhejianglab.com/zj021::aweaiteam/scaleswe:latest"
     assert context["workdir"] == "/workspace/project"
     assert context["patch"] == "diff --git a/a.py b/a.py\n"
