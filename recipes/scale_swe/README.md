@@ -69,7 +69,9 @@ Current schema rules are strict:
 --data-file PATH             Path to the ScaleSWE dataset JSONL file (required)
 --predictions-file PATH      Path to the predictions JSONL file (required)
 --output-file PATH           Path to write the JSON report (required)
+--progress-file PATH         Path to append JSONL progress events for resume support
 --docker-image-prefix TEXT   Optional Docker registry prefix override
+--remove-image-after-eval    Remove each Docker image after its evaluation finishes
 --max-concurrent N           Max parallel evaluations (default: 4)
 --timeout N                  Per-instance evaluation timeout in seconds (default: 3600)
 ```
@@ -77,7 +79,9 @@ Current schema rules are strict:
 Argument details:
 
 - `--output-file` creates parent directories automatically if they do not already exist
+- `--progress-file` writes append-only JSONL progress records as instances finish; if omitted, the default is `<output-file>.progress.jsonl`
 - `--docker-image-prefix` overrides the registry prefix when resolving dataset image URLs
+- `--remove-image-after-eval` deletes the evaluated Docker image after the container is removed to save disk space
 - `--max-concurrent` limits how many non-empty predictions are evaluated at once
 - `--timeout` applies per instance
 
@@ -90,14 +94,16 @@ python recipes/scale_swe/eval_predictions.py \
     --output-file reports/scale_swe_eval.json
 ```
 
-With a custom registry prefix, concurrency, and timeout:
+With a custom registry prefix, progress log, image cleanup, concurrency, and timeout:
 
 ```bash
 python recipes/scale_swe/eval_predictions.py \
     --data-file assets/scale-swe-batch1.jsonl \
     --predictions-file assets/predictions.jsonl \
     --output-file reports/scale_swe_eval.json \
+    --progress-file reports/scale_swe_eval.progress.jsonl \
     --docker-image-prefix harbor.zhejianglab.com/zj021 \
+    --remove-image-after-eval \
     --max-concurrent 8 \
     --timeout 600
 ```
@@ -183,7 +189,11 @@ For each submitted instance with a non-empty patch, the CLI:
 1. loads the ScaleSWE instance from `--data-file`
 2. resolves the Docker image, optionally using `--docker-image-prefix`
 3. runs `ScaleSWEEvaluator`
-4. records whether the patch was accepted
+4. appends a per-instance JSONL record to `--progress-file`
+5. updates the terminal progress bar
+6. optionally removes the Docker image if `--remove-image-after-eval` is enabled
+
+The progress log is resumable. If `--progress-file` already contains a completed record for an instance, the CLI reuses that result instead of evaluating the instance again.
 
 The output report is summary-only. It does not include per-instance evaluator details beyond the resolved, unresolved, error, empty-patch, and incomplete buckets.
 
@@ -193,4 +203,6 @@ The output report is summary-only. It does not include per-instance evaluator de
 - `Prediction schema violation: unexpected keys ...`: remove extra fields from the predictions JSONL
 - `Predictions contain duplicate instance_id`: ensure each prediction appears only once
 - Docker or image pull failures: verify Docker is running and the resolved images are accessible from your registry
+- Image removal failures with `--remove-image-after-eval`: verify no other containers are still using the same image
+- To resume after interruption: rerun the command with the same `--progress-file`
 - Long-running evaluations: lower `--max-concurrent`, raise `--timeout`, or both

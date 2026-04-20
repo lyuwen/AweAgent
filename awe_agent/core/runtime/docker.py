@@ -21,9 +21,11 @@ logger = logging.getLogger(__name__)
 class DockerSession(RuntimeSession):
     """A runtime session backed by a Docker container."""
 
-    def __init__(self, container: Any, config: RuntimeConfig) -> None:
+    def __init__(self, container: Any, config: RuntimeConfig, client: Any, image: str) -> None:
         self._container = container
         self._config = config
+        self._client = client
+        self._image = image
         self._closed = False
 
     async def execute(
@@ -37,13 +39,11 @@ class DockerSession(RuntimeSession):
 
         workdir = cwd or self._config.workdir
 
-        # Build environment
         exec_env = {}
         if env:
             exec_env.update(env)
 
-        # docker SDK exec_run is synchronous; run in thread
-        def _run() -> tuple[int, bytes]:
+        def _run() -> tuple[int, Any]:
             result = self._container.exec_run(
                 ["bash", "-c", command],
                 workdir=workdir,
@@ -54,8 +54,6 @@ class DockerSession(RuntimeSession):
 
         loop = asyncio.get_running_loop()
 
-        # Per-command timeout (e.g. bash_timeout=120); session TTL is
-        # enforced at the protocol layer via asyncio.timeout().
         if timeout is not None:
             try:
                 exit_code, output = await asyncio.wait_for(
@@ -63,9 +61,6 @@ class DockerSession(RuntimeSession):
                     timeout=timeout,
                 )
             except asyncio.TimeoutError:
-                # Kill orphan processes inside the container to prevent
-                # resource leaks.  The exec_run thread may still be blocked
-                # but Docker will terminate the exec once we kill its PID.
                 try:
                     self._container.exec_run(
                         ["bash", "-c", "kill -9 -1 2>/dev/null || true"],
@@ -111,7 +106,6 @@ class DockerSession(RuntimeSession):
             try:
                 bits, _ = self._container.get_archive(remote_path)
             except Exception as exc:
-                # docker SDK raises NotFound (404) when file does not exist
                 raise FileNotFoundError(f"File not found: {remote_path}") from exc
             buf = io.BytesIO()
             for chunk in bits:
@@ -143,11 +137,19 @@ class DockerSession(RuntimeSession):
             try:
                 self._container.stop(timeout=10)
                 self._container.remove(force=True)
+                logger.info("Container %s removed", self._container.id[:12])
             except Exception:
                 logger.warning("Failed to cleanup container %s", self._container.id[:12])
+                return
+
+            if self._config.docker.remove_image_after_use:
+                try:
+                    self._client.images.remove(self._image, force=True)
+                    logger.info("Image %s removed", self._image)
+                except Exception:
+                    logger.warning("Failed to remove image %s", self._image)
 
         await asyncio.get_running_loop().run_in_executor(None, _cleanup)
-        logger.info("Container %s removed", self._container.id[:12])
 
 
 class DockerRuntime(Runtime):
@@ -176,12 +178,10 @@ class DockerRuntime(Runtime):
         if not img:
             raise ValueError("No image specified for Docker runtime")
 
-        # Container names only allow [a-zA-Z0-9_.-]
         safe_img = re.sub(r"[^a-zA-Z0-9_.-]", "-", img.rsplit("/", 1)[-1])
         container_name = f"awe-agent-{safe_img}-{uuid.uuid4().hex[:12]}"
 
         def _create() -> Any:
-            # Pull if needed
             if self.config.docker.pull_policy == "always":
                 logger.info("Pulling image %s", img)
                 client.images.pull(img)
@@ -192,7 +192,6 @@ class DockerRuntime(Runtime):
                     logger.info("Image %s not found locally, pulling", img)
                     client.images.pull(img)
 
-            # Parse resource limits
             mem_str = self.config.resource_limits.memory
             mem_bytes = _parse_memory(mem_str)
             cpu_count = int(float(self.config.resource_limits.cpu))
@@ -214,7 +213,7 @@ class DockerRuntime(Runtime):
         loop = asyncio.get_running_loop()
         container = await loop.run_in_executor(None, _create)
         logger.info("Created container %s (%s) from %s", container_name, container.id[:12], img)
-        return DockerSession(container, self.config)
+        return DockerSession(container, self.config, client, img)
 
 
 def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:

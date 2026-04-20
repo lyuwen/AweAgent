@@ -22,6 +22,7 @@ class DockerConfig(BaseModel):
     volumes: list[str] = Field(default_factory=list)
     pull_policy: str = "if_not_present"  # always | if_not_present | never
     environment: dict[str, str] = Field(default_factory=dict)
+    remove_image_after_use: bool = False
 
 
 class K8sConfig(BaseModel):

@@ -2,7 +2,8 @@
 
 Evaluates pre-collected agent patches against the Scale SWE benchmark
 without running the agent. Reads a dataset JSONL and a predictions JSONL,
-runs each prediction through ScaleSWEEvaluator, and writes a JSON report.
+runs each prediction through ScaleSWEEvaluator, writes incremental progress,
+and writes a final JSON report.
 
 Usage:
     python recipes/scale_swe/eval_predictions.py \
@@ -33,6 +34,40 @@ SCHEMA_VERSION = "1.0"
 ALLOWED_PREDICTION_KEYS = {"instance_id", "model_name_or_path", "model_patch"}
 
 
+class ProgressTracker:
+    def __init__(self, total: int) -> None:
+        self._total = total
+        self._completed = 0
+        self._resolved = 0
+        self._unresolved = 0
+        self._errored = 0
+        self._lock = asyncio.Lock()
+
+    async def advance(self, instance_id: str, status: str) -> None:
+        async with self._lock:
+            self._completed += 1
+            if "unresolved" in status:
+                self._unresolved += 1
+            elif "resolved" in status:
+                self._resolved += 1
+            else:
+                self._errored += 1
+            width = 24
+            filled = 0
+            if self._total:
+                filled = int(width * self._completed / self._total)
+            bar = "#" * filled + "-" * (width - filled)
+            counts = f"P:{self._resolved} F:{self._unresolved} E:{self._errored}"
+            print(
+                f"\r[{bar}] {self._completed}/{self._total} {counts} | {instance_id} {status}",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
+            if self._completed == self._total:
+                print(file=sys.stderr, flush=True)
+
+
 def resolve_image_url(image_url: str, prefix: str | None = None) -> str:
     if not prefix:
         return image_url
@@ -47,7 +82,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--data-file", required=True, help="Path to dataset JSONL")
     p.add_argument("--predictions-file", required=True, help="Path to predictions JSONL")
     p.add_argument("--output-file", required=True, help="Path to write JSON report")
+    p.add_argument(
+        "--progress-file",
+        default=None,
+        help="Path to write append-only JSONL progress events (default: <output>.progress.jsonl)",
+    )
     p.add_argument("--docker-image-prefix", default=None, help="Docker image registry prefix")
+    p.add_argument(
+        "--remove-image-after-eval",
+        action="store_true",
+        help="Remove the Docker image after each instance evaluation finishes",
+    )
     p.add_argument("--max-concurrent", type=int, default=4, help="Max parallel evaluations")
     p.add_argument("--timeout", type=int, default=3600, help="Per-instance eval timeout (seconds)")
     return p.parse_args()
@@ -80,6 +125,32 @@ def load_predictions(path: Path) -> dict[str, dict[str, Any]]:
                 )
             predictions[instance_id] = record
     return predictions
+
+
+def load_progress_records(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    records: dict[str, dict[str, Any]] = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            record = json.loads(line)
+            instance_id = record.get("instance_id")
+            if instance_id:
+                records[instance_id] = record
+    return records
+
+
+async def append_progress_record(
+    path: Path,
+    write_lock: asyncio.Lock,
+    record: dict[str, Any],
+) -> None:
+    async with write_lock:
+        with open(path, "a") as f:
+            f.write(json.dumps(record) + "\n")
 
 
 def build_evaluation_context(
@@ -170,6 +241,7 @@ async def _evaluate_instance(
     prediction: dict[str, Any],
     docker_image_prefix: str | None,
     timeout: int,
+    remove_image_after_eval: bool,
 ) -> dict[str, Any]:
     from awe_agent.core.runtime import RuntimeConfig
     from awe_agent.core.runtime.docker import DockerRuntime
@@ -183,10 +255,19 @@ async def _evaluate_instance(
 
     evaluator = ScaleSWEEvaluator(timeout=timeout)
     runtime = DockerRuntime(
-        RuntimeConfig(backend="docker", image=ctx["image"], workdir=ctx["workdir"]),
+        RuntimeConfig(
+            backend="docker",
+            image=ctx["image"],
+            workdir=ctx["workdir"],
+            docker={"remove_image_after_use": remove_image_after_eval},
+        ),
     )
     eval_result = await evaluator.evaluate(inst_obj, ctx["patch"], runtime)
-    return {"accepted": eval_result.accepted}
+    return {
+        "accepted": eval_result.accepted,
+        "details": eval_result.details,
+        "duration": eval_result.duration,
+    }
 
 
 async def _build_async_report(
@@ -195,9 +276,24 @@ async def _build_async_report(
     docker_image_prefix: str | None,
     max_concurrent: int,
     timeout: int,
+    progress_file: Path,
+    remove_image_after_eval: bool,
 ) -> dict[str, Any]:
     semaphore = asyncio.Semaphore(max_concurrent)
+    write_lock = asyncio.Lock()
     results_by_id: dict[str, dict[str, Any]] = {}
+    progress_records = load_progress_records(progress_file)
+    total_to_track = sum(
+        1
+        for instance in dataset_instances
+        if (prediction := predictions_by_id.get(instance["instance_id"])) is not None
+        and prediction.get("model_patch", "").strip()
+    )
+    tracker = ProgressTracker(total_to_track)
+
+    for instance_id, record in progress_records.items():
+        if "accepted" in record or "error" in record:
+            results_by_id[instance_id] = record
 
     async def _evaluate_if_needed(instance: dict[str, Any]) -> None:
         instance_id = instance["instance_id"]
@@ -209,16 +305,36 @@ async def _build_async_report(
         if not patch or not patch.strip():
             return
 
+        cached = progress_records.get(instance_id)
+        if cached is not None and ("accepted" in cached or "error" in cached):
+            status = "cached-error" if "error" in cached else ("cached-resolved" if cached.get("accepted") else "cached-unresolved")
+            await tracker.advance(instance_id, status)
+            return
+
         async with semaphore:
             try:
-                results_by_id[instance_id] = await _evaluate_instance(
+                result = await _evaluate_instance(
                     instance=instance,
                     prediction=prediction,
                     docker_image_prefix=docker_image_prefix,
                     timeout=timeout,
+                    remove_image_after_eval=remove_image_after_eval,
                 )
+                record = {
+                    "instance_id": instance_id,
+                    "accepted": result["accepted"],
+                    "duration": result.get("duration", 0.0),
+                    "details": result.get("details", {}),
+                }
+                results_by_id[instance_id] = record
+                await append_progress_record(progress_file, write_lock, record)
+                status = "resolved" if result["accepted"] else "unresolved"
+                await tracker.advance(instance_id, status)
             except Exception as exc:
-                results_by_id[instance_id] = {"error": str(exc)}
+                record = {"instance_id": instance_id, "error": str(exc)}
+                results_by_id[instance_id] = record
+                await append_progress_record(progress_file, write_lock, record)
+                await tracker.advance(instance_id, "error")
 
     await asyncio.gather(*(_evaluate_if_needed(instance) for instance in dataset_instances))
 
@@ -242,6 +358,7 @@ async def _run(args: argparse.Namespace) -> None:
     data_path = Path(args.data_file)
     predictions_path = Path(args.predictions_file)
     output_path = Path(args.output_file)
+    progress_path = Path(args.progress_file) if args.progress_file else Path(f"{output_path}.progress.jsonl")
 
     from awe_agent.tasks.scale_swe.task import ScaleSWETask
 
@@ -249,17 +366,21 @@ async def _run(args: argparse.Namespace) -> None:
     dataset_instances = [instance.metadata["raw"] for instance in task.get_instances()]
     predictions_by_id = load_predictions(predictions_path)
 
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
     report = await _build_async_report(
         dataset_instances=dataset_instances,
         predictions_by_id=predictions_by_id,
         docker_image_prefix=args.docker_image_prefix,
         max_concurrent=args.max_concurrent,
         timeout=args.timeout,
+        progress_file=progress_path,
+        remove_image_after_eval=args.remove_image_after_eval,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         json.dump(report, f, indent=2)
+    logger.info("Progress written to %s", progress_path)
     logger.info("Report written to %s", output_path)
 
 
