@@ -374,3 +374,23 @@ def test_run_loads_dataset_via_scale_swe_task_and_writes_report(
     assert json.loads(output_path.read_text())["incomplete_ids"] == ["asset-case"]
 
 
+def test_build_evaluation_context_resolves_image_urls_with_prefix():
+    module = _load_module()
+
+    context = module.build_evaluation_context(
+        instance={
+            "instance_id": "image-case",
+            "image_url": "aweaiteam/scaleswe:latest",
+            "workdir": "/workspace/project",
+        },
+        prediction={
+            "instance_id": "image-case",
+            "model_name_or_path": "test-model",
+            "model_patch": "diff --git a/a.py b/a.py\n",
+        },
+        docker_image_prefix="harbor.zhejianglab.com/zj021",
+    )
+
+    assert context["image"] == "harbor.zhejianglab.com/zj021/scaleswe:latest"
+    assert context["workdir"] == "/workspace/project"
+    assert context["patch"] == "diff --git a/a.py b/a.py\n"
