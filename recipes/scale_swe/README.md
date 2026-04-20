@@ -81,17 +81,6 @@ Argument details:
 - `--max-concurrent` limits how many non-empty predictions are evaluated at once
 - `--timeout` applies per instance
 
-### Image resolution dependency
-
-The offline evaluator needs the `resolve_image_url` helper from the ScaleSWE benchmark package.
-
-It resolves that helper in this order:
-
-1. import `benchmarks.scaleswe.run_infer` from an installed benchmarks package
-2. if that import is unavailable, read the file pointed to by `AWE_SCALE_SWE_RUN_INFER_PATH`
-
-`AWE_SCALE_SWE_RUN_INFER_PATH` must point to a `run_infer.py` file that defines `resolve_image_url`.
-
 ### Example usage
 
 ```bash
@@ -204,5 +193,4 @@ The output report is summary-only. It does not include per-instance evaluator de
 - `Prediction schema violation: unexpected keys ...`: remove extra fields from the predictions JSONL
 - `Predictions contain duplicate instance_id`: ensure each prediction appears only once
 - Docker or image pull failures: verify Docker is running and the resolved images are accessible from your registry
-- `ImportError: Could not import benchmarks.scaleswe.run_infer`: install the benchmarks package, or set `AWE_SCALE_SWE_RUN_INFER_PATH=/path/to/run_infer.py`
 - Long-running evaluations: lower `--max-concurrent`, raise `--timeout`, or both

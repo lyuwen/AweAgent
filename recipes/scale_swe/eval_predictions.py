@@ -17,13 +17,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import ast
 import asyncio
 import json
 import logging
 import os
 import sys
-from importlib import import_module
 from pathlib import Path
 from typing import Any, Callable
 
@@ -33,40 +31,13 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = "1.0"
 ALLOWED_PREDICTION_KEYS = {"instance_id", "model_name_or_path", "model_patch"}
-RUN_INFER_ENV_VAR = "AWE_SCALE_SWE_RUN_INFER_PATH"
 
 
-def _load_resolve_image_url_from_path(path: Path) -> Callable[[str, str | None], str]:
-    source = path.read_text()
-    module = ast.parse(source, filename=str(path))
-    for node in module.body:
-        if isinstance(node, ast.FunctionDef) and node.name == "resolve_image_url":
-            function_module = ast.Module(body=[node], type_ignores=[])
-            namespace: dict[str, Any] = {}
-            exec(compile(function_module, str(path), "exec"), namespace)
-            return namespace["resolve_image_url"]
-    raise ValueError(f"resolve_image_url not found in {path}")
-
-
-def _load_resolve_image_url() -> Callable[[str, str | None], str]:
-    try:
-        module = import_module("benchmarks.scaleswe.run_infer")
-    except ImportError:
-        env_path = os.getenv(RUN_INFER_ENV_VAR)
-        if env_path:
-            return _load_resolve_image_url_from_path(Path(env_path))
-        raise ImportError(
-            "Could not import benchmarks.scaleswe.run_infer. "
-            f"Set {RUN_INFER_ENV_VAR} to the path of run_infer.py."
-        )
-
-    resolve = getattr(module, "resolve_image_url", None)
-    if resolve is None:
-        raise ValueError("benchmarks.scaleswe.run_infer does not define resolve_image_url")
-    return resolve
-
-
-resolve_image_url = _load_resolve_image_url()
+def resolve_image_url(image_url: str, prefix: str | None = None) -> str:
+    if not prefix:
+        return image_url
+    _, _, image_name = image_url.rpartition("/")
+    return f"{prefix.rstrip('/')}/{image_name}"
 
 
 def parse_args() -> argparse.Namespace:
