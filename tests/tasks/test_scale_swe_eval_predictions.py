@@ -319,7 +319,7 @@ def test_build_async_report_reuses_progress_file_records(
 
     async def fake_evaluate_instance(**kwargs):
         calls.append(kwargs["instance"]["instance_id"])
-        return {"accepted": False, "details": {}, "duration": 1.5}
+        return {"accepted": False, "status": "failed", "details": {}, "duration": 1.5}
 
     monkeypatch.setattr(module, "_evaluate_instance", fake_evaluate_instance)
 
@@ -360,8 +360,61 @@ def test_build_async_report_reuses_progress_file_records(
     progress_lines = [json.loads(line) for line in progress_path.read_text().splitlines() if line]
     assert progress_lines[-1]["instance_id"] == "new-case"
     assert progress_lines[-1]["accepted"] is False
+    assert progress_lines[-1]["status"] == "failed"
 
 
+def test_build_async_report_retries_cached_infra_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_module()
+    calls: list[str] = []
+
+    async def fake_evaluate_instance(**kwargs):
+        calls.append(kwargs["instance"]["instance_id"])
+        return {"accepted": True, "status": "passed", "details": {}, "duration": 1.5}
+
+    monkeypatch.setattr(module, "_evaluate_instance", fake_evaluate_instance)
+
+    progress_path = tmp_path / "progress.jsonl"
+    progress_path.write_text(
+        json.dumps(
+            {
+                "instance_id": "infra-error-case",
+                "accepted": False,
+                "duration": 0.1,
+                "details": {"error": "No such image"},
+            }
+        )
+        + "\n"
+    )
+
+    report = asyncio.run(
+        module._build_async_report(
+            dataset_instances=[
+                {"instance_id": "infra-error-case", "image_url": "img/a", "workdir": "/workspace"},
+            ],
+            predictions_by_id={
+                "infra-error-case": {
+                    "instance_id": "infra-error-case",
+                    "model_name_or_path": "test-model",
+                    "model_patch": "diff --git a/a.py b/a.py\n",
+                },
+            },
+            docker_image_prefix=None,
+            max_concurrent=1,
+            timeout=600,
+            progress_file=progress_path,
+            remove_image_after_eval=False,
+        )
+    )
+
+    assert calls == ["infra-error-case"]
+    assert report["resolved_ids"] == ["infra-error-case"]
+    assert report["error_ids"] == []
+    progress_lines = [json.loads(line) for line in progress_path.read_text().splitlines() if line]
+    assert progress_lines[-1]["instance_id"] == "infra-error-case"
+    assert progress_lines[-1]["status"] == "passed"
 def test_run_loads_dataset_via_scale_swe_task_and_writes_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

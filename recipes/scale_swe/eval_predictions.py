@@ -46,9 +46,9 @@ class ProgressTracker:
     async def advance(self, instance_id: str, status: str) -> None:
         async with self._lock:
             self._completed += 1
-            if "unresolved" in status:
+            if "failed" in status or "unresolved" in status:
                 self._unresolved += 1
-            elif "resolved" in status:
+            elif "passed" in status or "resolved" in status:
                 self._resolved += 1
             else:
                 self._errored += 1
@@ -143,6 +143,25 @@ def load_progress_records(path: Path) -> dict[str, dict[str, Any]]:
     return records
 
 
+def classify_result_status(result: dict[str, Any]) -> str:
+    status = result.get("status")
+    if status in {"passed", "failed", "error"}:
+        return status
+    outcome = result.get("outcome")
+    if outcome in {"passed", "failed", "error"}:
+        return outcome
+    if "error" in result:
+        return "error"
+    details = result.get("details")
+    if isinstance(details, dict) and "error" in details:
+        return "error"
+    return "passed" if result.get("accepted") else "failed"
+
+
+def is_terminal_progress_record(record: dict[str, Any]) -> bool:
+    return classify_result_status(record) in {"passed", "failed"}
+
+
 async def append_progress_record(
     path: Path,
     write_lock: asyncio.Lock,
@@ -200,10 +219,13 @@ def build_report(
 
         try:
             result = evaluate_prediction(inst, prediction)
-            if result.get("accepted"):
+            outcome = classify_result_status(result)
+            if outcome == "passed":
                 resolved_ids.append(iid)
-            else:
+            elif outcome == "failed":
                 unresolved_ids.append(iid)
+            else:
+                error_ids.append(iid)
         except Exception:
             logger.exception("Evaluation error for %s", iid)
             error_ids.append(iid)
@@ -263,8 +285,12 @@ async def _evaluate_instance(
         ),
     )
     eval_result = await evaluator.evaluate(inst_obj, ctx["patch"], runtime)
+    outcome = classify_result_status(
+        {"accepted": eval_result.accepted, "details": eval_result.details},
+    )
     return {
         "accepted": eval_result.accepted,
+        "status": outcome,
         "details": eval_result.details,
         "duration": eval_result.duration,
     }
@@ -292,7 +318,7 @@ async def _build_async_report(
     tracker = ProgressTracker(total_to_track)
 
     for instance_id, record in progress_records.items():
-        if "accepted" in record or "error" in record:
+        if is_terminal_progress_record(record):
             results_by_id[instance_id] = record
 
     async def _evaluate_if_needed(instance: dict[str, Any]) -> None:
@@ -306,8 +332,8 @@ async def _build_async_report(
             return
 
         cached = progress_records.get(instance_id)
-        if cached is not None and ("accepted" in cached or "error" in cached):
-            status = "cached-error" if "error" in cached else ("cached-resolved" if cached.get("accepted") else "cached-unresolved")
+        if cached is not None and is_terminal_progress_record(cached):
+            status = f"cached-{classify_result_status(cached)}"
             await tracker.advance(instance_id, status)
             return
 
@@ -323,15 +349,15 @@ async def _build_async_report(
                 record = {
                     "instance_id": instance_id,
                     "accepted": result["accepted"],
+                    "status": result["status"],
                     "duration": result.get("duration", 0.0),
                     "details": result.get("details", {}),
                 }
                 results_by_id[instance_id] = record
                 await append_progress_record(progress_file, write_lock, record)
-                status = "resolved" if result["accepted"] else "unresolved"
-                await tracker.advance(instance_id, status)
+                await tracker.advance(instance_id, result["status"])
             except Exception as exc:
-                record = {"instance_id": instance_id, "error": str(exc)}
+                record = {"instance_id": instance_id, "status": "error", "error": str(exc)}
                 results_by_id[instance_id] = record
                 await append_progress_record(progress_file, write_lock, record)
                 await tracker.advance(instance_id, "error")
