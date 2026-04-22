@@ -447,6 +447,8 @@ def test_run_loads_dataset_via_scale_swe_task_and_writes_report(
         timeout,
         progress_file,
         remove_image_after_eval,
+        cleanup_interval_minutes=0,
+        cleanup_min_age_minutes=30,
     ):
         captured["dataset_instances"] = dataset_instances
         captured["predictions_by_id"] = predictions_by_id
@@ -502,6 +504,8 @@ def test_run_loads_dataset_via_scale_swe_task_and_writes_report(
         remove_image_after_eval=True,
         max_concurrent=8,
         timeout=600,
+        cleanup_interval=0,
+        cleanup_min_age=30,
     )
 
     asyncio.run(module._run(args))
@@ -550,6 +554,8 @@ def test_run_defaults_progress_file_from_output_path(
         timeout,
         progress_file,
         remove_image_after_eval,
+        cleanup_interval_minutes=0,
+        cleanup_min_age_minutes=30,
     ):
         captured["progress_file"] = progress_file
         return {
@@ -598,6 +604,8 @@ def test_run_defaults_progress_file_from_output_path(
         remove_image_after_eval=False,
         max_concurrent=4,
         timeout=600,
+        cleanup_interval=0,
+        cleanup_min_age=30,
     )
 
     asyncio.run(module._run(args))

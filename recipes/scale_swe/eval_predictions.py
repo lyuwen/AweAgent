@@ -95,6 +95,18 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--max-concurrent", type=int, default=4, help="Max parallel evaluations")
     p.add_argument("--timeout", type=int, default=3600, help="Per-instance eval timeout (seconds)")
+    p.add_argument(
+        "--cleanup-interval",
+        type=int,
+        default=30,
+        help="Minutes between periodic Docker cleanups (0 to disable, default: 30)",
+    )
+    p.add_argument(
+        "--cleanup-min-age",
+        type=int,
+        default=30,
+        help="Only remove dangling images older than this many minutes (default: 30)",
+    )
     return p.parse_args()
 
 
@@ -296,6 +308,56 @@ async def _evaluate_instance(
     }
 
 
+async def _cleanup_dangling_images(min_age_minutes: int = 30) -> int:
+    """Remove dangling Docker images older than *min_age_minutes*.
+
+    Mirrors the logic in ``find-dangling-images.sh``: lists all dangling
+    images, inspects each creation timestamp, and removes those older than
+    the cutoff.  Returns the number of images removed.
+    """
+    script = f"""\
+cutoff=$(date -d '{min_age_minutes} minutes ago' +%s)
+removed=0
+for img in $(docker images -f "dangling=true" -q); do
+    created=$(docker inspect --format '{{{{.Created}}}}' "$img")
+    created_epoch=$(date -d "$created" +%s)
+    if [ "$created_epoch" -lt "$cutoff" ]; then
+        docker image rm "$img" >/dev/null 2>&1 && removed=$((removed + 1))
+    fi
+done
+echo "$removed"
+"""
+    proc = await asyncio.create_subprocess_shell(
+        script,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        logger.warning("Dangling image cleanup failed: %s", stderr.decode().strip())
+        return 0
+    count = int(stdout.decode().strip() or "0")
+    if count:
+        logger.info("Removed %d dangling image(s)", count)
+    return count
+
+
+async def _periodic_cleanup_loop(
+    interval_seconds: float,
+    min_age_minutes: int,
+) -> None:
+    """Run Docker dangling-image cleanup on a fixed-period timer.
+
+    The interval includes cleanup time so each cycle is exactly
+    *interval_seconds* wall-clock seconds apart.
+    """
+    while True:
+        await asyncio.sleep(interval_seconds)
+        logger.info("Running periodic Docker cleanup …")
+        await _cleanup_dangling_images(min_age_minutes)
+        logger.info("Periodic cleanup complete")
+
+
 async def _build_async_report(
     dataset_instances: list[dict[str, Any]],
     predictions_by_id: dict[str, dict[str, Any]],
@@ -304,6 +366,8 @@ async def _build_async_report(
     timeout: int,
     progress_file: Path,
     remove_image_after_eval: bool,
+    cleanup_interval_minutes: int = 0,
+    cleanup_min_age_minutes: int = 30,
 ) -> dict[str, Any]:
     semaphore = asyncio.Semaphore(max_concurrent)
     write_lock = asyncio.Lock()
@@ -362,7 +426,24 @@ async def _build_async_report(
                 await append_progress_record(progress_file, write_lock, record)
                 await tracker.advance(instance_id, "error")
 
-    await asyncio.gather(*(_evaluate_if_needed(instance) for instance in dataset_instances))
+    cleanup_task = None
+    if cleanup_interval_minutes > 0:
+        cleanup_task = asyncio.create_task(
+            _periodic_cleanup_loop(
+                interval_seconds=cleanup_interval_minutes * 60,
+                min_age_minutes=cleanup_min_age_minutes,
+            )
+        )
+
+    try:
+        await asyncio.gather(*(_evaluate_if_needed(instance) for instance in dataset_instances))
+    finally:
+        if cleanup_task is not None:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
 
     def evaluate_prediction(instance: dict[str, Any], _: dict[str, Any]) -> dict[str, Any]:
         result = results_by_id.get(instance["instance_id"])
@@ -401,6 +482,8 @@ async def _run(args: argparse.Namespace) -> None:
         timeout=args.timeout,
         progress_file=progress_path,
         remove_image_after_eval=args.remove_image_after_eval,
+        cleanup_interval_minutes=args.cleanup_interval,
+        cleanup_min_age_minutes=args.cleanup_min_age,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
